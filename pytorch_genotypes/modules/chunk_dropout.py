@@ -44,8 +44,16 @@ class ChunkDropout(nn.Module):
         else:
             self.minimum_hole_length = torch.tensor(minimum_hole_length)
 
-    def get_dropout_indices(self, _verbose: bool = False) -> Tensor:
-        output = torch.zeros(self.input_length, dtype=torch.bool)
+    def get_dropout_indices(
+        self,
+        x: Optional[Tensor] = None,
+        _verbose: bool = False
+    ) -> Tensor:
+        output = torch.zeros(
+            self.input_length,
+            dtype=torch.bool,
+            device=x.device if x is not None else None
+        )
 
         last_gap = (0, 0)
 
@@ -91,8 +99,10 @@ class ChunkDropout(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         if self.training:
-            x[:, self.get_dropout_indices()] = 0
-            return x
+            with torch.no_grad():
+                mask = 1 - self.get_dropout_indices(x).to(torch.int)
+
+            return x * mask
 
         return x
 

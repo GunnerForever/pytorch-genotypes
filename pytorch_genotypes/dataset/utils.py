@@ -1,4 +1,5 @@
-from typing import Optional, Set, Callable, Tuple, Union
+from typing import Optional, Set, Callable, Tuple, Union, List
+import os
 
 import torch
 import numpy as np
@@ -9,14 +10,26 @@ VariantPredicate = Callable[[Genotypes], bool]
 TorchOrNumpyArray = Union[np.ndarray, torch.Tensor]
 
 
-def dosage_to_hard_call(matrix: torch.Tensor):
+def resolve_path(filename: str, contexts: Optional[List[str]] = None) -> str:
+    """Tries to resolve a path, possibly in different locations (contexts)."""
+    try:
+        with open(filename, "r"):
+            pass
+        return filename
+    except FileNotFoundError:
+        pass
 
-    out = torch.ones_like(matrix, dtype=torch.int)
+    if contexts:
+        for context in contexts:
+            cur = os.path.join(context, filename)
+            try:
+                with open(cur, "r"):
+                    pass
+                return cur
+            except FileNotFoundError:
+                pass
 
-    out[matrix <= 1/3] = 0
-    out[matrix >= 5/3] = 2
-
-    return out
+    raise FileNotFoundError(filename)
 
 
 def standardize_features(
