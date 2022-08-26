@@ -9,7 +9,12 @@ from typing import Dict
 from pkg_resources import resource_filename
 
 from pytorch_genotypes.dataset.core import FixedSizeChunks
-from ..dataset import BACKENDS
+from ..dataset import BACKENDS, GeneticDataset
+
+import torch
+from torch.utils.data import DataLoader, Dataset, TensorDataset
+from models import ChildModel
+import pytorch_lightning as pl
 
 
 DEFAULT_TEMPLATE = resource_filename(
@@ -19,7 +24,38 @@ DEFAULT_TEMPLATE = resource_filename(
 
 
 def train(args):
-    pass
+    print("-----------------------------------")
+    print("Block Training Process Begin.")
+    print("-----------------------------------")
+    backend = BACKENDS[args.backend].load(args.backend_pickle_filename)
+    chunks = FixedSizeChunks(backend, max_variants_per_chunk=args.chunk_size)
+    tensor_dataset = TensorDataset(chunks.get_tensor_from_chunk_id(args.chunk_index))
+    
+    hidden_layer_units = 16
+    train_loader = DataLoader(tensor_dataset, batch_size = len(tensor_dataset), num_workers=0)
+    model = ChildModel(args.chunk_size, hidden_layer_units)
+    epochs = 100
+
+    trainer = pl.Trainer(
+    log_every_n_steps=1,    # set the logging frequency
+    gpus=-1,                # use all GPUs
+    max_epochs=epochs,      # number of epochs
+    deterministic=False,    # keep it non-deterministic
+    auto_lr_find = True     # Find the learning rate
+    )
+    trainer.fit(model, train_loader)
+    print("-----------------------------------")
+    print('Training process has finished. Saving trained model.')
+    print("-----------------------------------")
+    #Save model 
+    results_base = "chunk_checkpoints"
+    os.makedirs(results_base)
+    checkpoint_filename = os.path.join(results_base, f"model-block-{args.chunk_index}.ckpt")
+    trainer.save_checkpoint(checkpoint_filename)
+    print("-----------------------------------")
+    print('Model Saved.')
+    print("-----------------------------------")
+
 
 
 def main():
