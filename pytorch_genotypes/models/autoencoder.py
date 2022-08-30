@@ -41,7 +41,7 @@ class GenotypeProbabilisticAutoencoder(pl.LightningModule):
         decoder: pl.LightningModule,
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=["encoder", "decoder"])
+        self.save_hyperparameters()
         self.encoder = encoder
         self.decoder = decoder
 
@@ -80,6 +80,10 @@ class GenotypeProbabilisticAutoencoder(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         batch = batch.to(torch.float32)
         return self._step(batch, batch_idx, log=True)
+
+    def test_step(self, batch, batch_idx):
+        batch = batch.to(torch.float32)
+        return self._step(batch, batch_idx, log=True, log_prefix="test")
 
     def configure_optimizers(self):
         return torch.optim.Adam(
