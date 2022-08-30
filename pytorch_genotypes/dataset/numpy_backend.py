@@ -4,6 +4,7 @@ Numpy backend for genotypes for datasets that fit in memory.
 
 import os
 import pickle
+import copy
 from typing import Optional, Set, Iterable, List
 
 from tqdm import tqdm
@@ -141,3 +142,26 @@ class NumpyBackend(GeneticDatasetBackend):
 
     def get_n_variants(self):
         return len(self.variants)
+
+    def split_samples(self, n_samples):
+        n_left = n_samples
+
+        # Select indices.
+        indices = np.random.permutation(len(self))
+
+        left_indices = indices[:n_left]
+        right_indices = indices[n_left:]
+
+        def _apply_subset(o, indices):
+            if o._idx is not None:
+                o._idx = o._idx[indices]
+
+            o.samples = [o.samples[i] for i in indices]
+            o.m = self.m[indices, :]
+
+            return o
+
+        left_backend = _apply_subset(copy.copy(self), left_indices)
+        right_backend = _apply_subset(copy.copy(self), right_indices)
+
+        return left_backend, right_backend
