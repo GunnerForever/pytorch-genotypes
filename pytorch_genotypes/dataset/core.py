@@ -56,6 +56,14 @@ class GeneticDatasetBackend(object):
     def __len__(self) -> int:
         return self.get_n_samples()
 
+    def split_samples(self, n_samples: int):
+        """Split a backend sample-wise.
+
+        This is useful, for example, to create a test or validation set.
+
+        """
+        raise NotImplementedError()
+
 
 class GeneticDataset(Dataset):
     def __init__(self, backend: GeneticDatasetBackend):

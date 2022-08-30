@@ -13,7 +13,8 @@ class ChunkDropout(nn.Module):
         dropout_probability: float,
         hole_length_loc: int,
         hole_length_scale: int,
-        minimum_hole_length: Optional[int] = None
+        minimum_hole_length: Optional[int] = None,
+        weight_scaling: bool = True
     ):
         """Module that applies dropout in chunks.
 
@@ -40,9 +41,24 @@ class ChunkDropout(nn.Module):
 
         if minimum_hole_length is None:
             self.minimum_hole_length = torch.tensor(1)
-
         else:
             self.minimum_hole_length = torch.tensor(minimum_hole_length)
+
+        self.weight_scaling = weight_scaling
+        if weight_scaling:
+            self._scaling_factor: Optional[Tensor] = torch.tensor(1)
+            self._scaling_factor = (
+                1 / self.estimate_effective_dropout_rate()
+            )
+        else:
+            self._scaling_factor = None
+
+    def set_scaling_factor(self, scaling_factor):
+        self._scaling_factor = scaling_factor
+        self.weight_scaling = True
+
+    def get_scaling_factor(self):
+        return self._scaling_factor
 
     def get_dropout_indices(
         self,
@@ -97,12 +113,36 @@ class ChunkDropout(nn.Module):
                     print()
                 return output
 
+    def estimate_effective_dropout_rate(
+        self,
+        n_samples: int = 2000
+    ) -> torch.Tensor:
+        """For rescaled dropout, we need to estimate the rescaling factor.
+
+        Typically, inputs are rescaled by 1/p(dropout) so that the expected
+        activation doesn't change. The current method helps estimate
+        p(dropout).
+
+        """
+        n = self.input_length
+
+        n_dropped = torch.zeros(n_samples, dtype=torch.int)
+
+        for i in range(n_samples):
+            n_dropped[i] = n - self(torch.ones(n)).sum()
+
+        return torch.mean(n_dropped / n)
+
     def forward(self, x: Tensor) -> Tensor:
         if self.training:
             with torch.no_grad():
                 mask = 1 - self.get_dropout_indices(x).to(torch.int)
 
-            return x * mask
+            if self.weight_scaling:
+                return x * mask * self._scaling_factor
+
+            else:
+                return x * mask
 
         return x
 
