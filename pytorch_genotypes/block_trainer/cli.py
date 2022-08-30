@@ -9,17 +9,15 @@ from typing import Dict
 from pkg_resources import resource_filename
 
 from pytorch_genotypes.dataset.core import FixedSizeChunks
-from ..dataset import BACKENDS, GeneticDataset
+from ..dataset import BACKENDS
 
-import torch
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
 from models import ChildModel
 import pytorch_lightning as pl
 
 
 DEFAULT_TEMPLATE = resource_filename(
-    __name__,
-    os.path.join("command_templates", "block_trainer_bash.sh")
+    __name__, os.path.join("command_templates", "block_trainer_bash.sh")
 )
 
 
@@ -29,33 +27,38 @@ def train(args):
     print("-----------------------------------")
     backend = BACKENDS[args.backend].load(args.backend_pickle_filename)
     chunks = FixedSizeChunks(backend, max_variants_per_chunk=args.chunk_size)
-    tensor_dataset = TensorDataset(chunks.get_tensor_from_chunk_id(args.chunk_index))
-    
+    tensor_dataset = TensorDataset(
+        chunks.get_tensor_from_chunk_id(args.chunk_index)
+    )
+
     hidden_layer_units = 16
-    train_loader = DataLoader(tensor_dataset, batch_size = len(tensor_dataset), num_workers=0)
+    train_loader = DataLoader(
+        tensor_dataset, batch_size=len(tensor_dataset), num_workers=0
+    )
     model = ChildModel(args.chunk_size, hidden_layer_units)
     epochs = 100
 
     trainer = pl.Trainer(
-    log_every_n_steps=1,    # set the logging frequency
-    gpus=-1,                # use all GPUs
-    max_epochs=epochs,      # number of epochs
-    deterministic=False,    # keep it non-deterministic
-    auto_lr_find = True     # Find the learning rate
+        log_every_n_steps=1,  # set the logging frequency
+        gpus=-1,  # use all GPUs
+        max_epochs=epochs,  # number of epochs
+        deterministic=False,  # keep it non-deterministic
+        auto_lr_find=True,  # Find the learning rate
     )
     trainer.fit(model, train_loader)
     print("-----------------------------------")
-    print('Training process has finished. Saving trained model.')
+    print("Training process has finished. Saving trained model.")
     print("-----------------------------------")
-    #Save model 
+    # Save model
     results_base = "chunk_checkpoints"
     os.makedirs(results_base)
-    checkpoint_filename = os.path.join(results_base, f"model-block-{args.chunk_index}.ckpt")
+    checkpoint_filename = os.path.join(
+        results_base, f"model-block-{args.chunk_index}.ckpt"
+    )
     trainer.save_checkpoint(checkpoint_filename)
     print("-----------------------------------")
-    print('Model Saved.')
+    print("Model Saved.")
     print("-----------------------------------")
-
 
 
 def main():
@@ -79,14 +82,12 @@ def main():
     command = (
         f"pt-geno-block-trainer "
         f"--backend {args.backend} "
-        f"--backend-pickle-filename \"{args.backend_pickle_filename}\" "
+        f'--backend-pickle-filename "{args.backend_pickle_filename}" '
         f"--chunk-size {args.chunk_size} "
     )
 
     script = template.format(
-        command=command,
-        n_blocks=len(chunks),
-        **template_params
+        command=command, n_blocks=len(chunks), **template_params
     )
 
     with open(args.output_script, "w") as f:
@@ -126,9 +127,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backend-pickle-filename",
         help="Path to a file containing a serialized backend that is an "
-             "instance of the class specified by '--backend'.",
+        "instance of the class specified by '--backend'.",
         type=str,
-        required=True
+        required=True,
     )
 
     # Chunking configuration.
@@ -138,20 +139,17 @@ def parse_args() -> argparse.Namespace:
         default=1000,
         type=int,
         help="Number of contiguous variants that are jointly modeled in the "
-             "blocks of the first level."
+        "blocks of the first level.",
     )
 
     # Script template.
     parser.add_argument("--template", type=str, default=None)
-    parser.add_argument(
-        "--template-params",
-        type=str,
-        default="n_cpus=1"
-    )
+    parser.add_argument("--template-params", type=str, default="n_cpus=1")
 
     # Output script.
     parser.add_argument(
-        "--output-script", type=str,
+        "--output-script",
+        type=str,
         default="run_step1_block_trainer_all_blocks.sh",
     )
 

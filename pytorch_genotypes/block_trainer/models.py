@@ -1,45 +1,60 @@
 import torch
-from torch import nn, optim
+from torch import nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
 
 
-class ChildModel (pl.LightningModule):
-  def __init__(self, input_dim, n_hidden, lr = 1e-3, drop = 0.25, reg = 1e-5):
-    super().__init__()
-    self.encoder = nn.Sequential(nn.Dropout(p=self.hparams.drop), nn.Linear(input_dim, n_hidden), nn.ReLU())
-    self.decoder = nn.Sequential(nn.Linear(n_hidden, input_dim), nn.ReLU(), 
-                                 nn.Linear(input_dim, 3*input_dim),
-                                 ReshapeLogSoftmax(n_snps = input_dim))
-    self.save_hyperparameters()
+class ChildModel(pl.LightningModule):
+    def __init__(self, input_dim, n_hidden, lr=1e-3, drop=0.25, reg=1e-5):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Dropout(
+                p=self.hparams.drop
+            ),
+            nn.Linear(input_dim, n_hidden),
+            nn.ReLU()
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(n_hidden, input_dim),
+            nn.ReLU(),
+            nn.Linear(input_dim, 3 * input_dim),
+            ReshapeLogSoftmax(n_snps=input_dim),
+        )
+        self.save_hyperparameters()
 
-  def forward (self, features):
-    reconstruction = self.encoder(features)
-    reconstruction = self.decoder(reconstruction)
-    return reconstruction
-  
-  def training_step(self, batch, batch_idx):
+    def forward(self, features):
+        reconstruction = self.encoder(features)
+        reconstruction = self.decoder(reconstruction)
+        return reconstruction
+
+    def training_step(self, batch, batch_idx):
         # Training_step defined the train loop.
         # It is independent of forward
-        x,_ = batch
+        x, _ = batch
         z = self.encoder(x)
         x_hat = self.decoder(z)
         loss = F.nll_loss(x_hat, torch.round(x).to(int))
         # Logging to TensorBoard by default
-        self.log(f"Batch: {batch_idx} Train Loss", loss, on_epoch = True)
+        self.log(f"Batch: {batch_idx} Train Loss", loss, on_epoch=True)
         return loss
-  
-  def configure_optimizers(self):   
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay = self.hparams.reg)
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(
+            self.parameters(),
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.reg
+        )
+
 
 class ReshapeLogSoftmax(nn.Module):
     def __init__(self, n_snps):
         super().__init__()
         self.n_snps = n_snps
-        
+
     def forward(self, x):
         x = x.view(-1, 3, self.n_snps)
         return F.log_softmax(x, dim=1)
+
 
 class ParentModel(pl.LightningModule):
     def __init__(self, modelA, modelB, modelC, lr=1e-3, reg=1e-5):
@@ -79,4 +94,6 @@ class ParentModel(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay = self.regularization)
+        return torch.optim.Adam(
+            self.parameters(), lr=self.lr, weight_decay=self.regularization
+        )
