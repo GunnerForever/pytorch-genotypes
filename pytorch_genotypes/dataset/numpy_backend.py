@@ -143,6 +143,14 @@ class NumpyBackend(GeneticDatasetBackend):
     def get_n_variants(self):
         return len(self.variants)
 
+    def extract_range(
+        self,
+        left: int,
+        right: int,
+    ) -> torch.Tensor:
+        assert self.m is not None
+        return torch.tensor(self.m[:, left:(right+1)])
+
     def split_samples(self, n_samples):
         n_left = n_samples
 

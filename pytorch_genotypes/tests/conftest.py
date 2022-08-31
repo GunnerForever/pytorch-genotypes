@@ -2,16 +2,24 @@
 
 import os
 import csv
+import tempfile
 import itertools
 
 import pytest
 import numpy as np
 from pkg_resources import resource_filename
 
-from ..dataset import NumpyBackend
+from ..dataset import NumpyBackend, ZarrBackend
 
 
-def get_small_backend():
+try:
+    import geneparse
+    GENEPARSE_AVAIL = True
+except ImportError:
+    GENEPARSE_AVAIL = False
+
+
+def get_small_np_backend():
     filename = resource_filename(
         __name__,
         os.path.join("test_data", "1kg_common_norel_thinned25.pkl")
@@ -31,9 +39,33 @@ def get_small_backend():
     return backend
 
 
+def create_and_get_small_zarr_backend():
+    if not GENEPARSE_AVAIL:
+        raise RuntimeError("geneparse required to create Zarr backend.")
+
+    plink_prefix = resource_filename(
+        __name__,
+        os.path.join("test_data", "1kg_common_norel_thinned25.bed")
+    )[:-4]
+
+    reader = geneparse.parsers["plink"](plink_prefix)
+
+    tmp_filename = tempfile.NamedTemporaryFile()
+    backend = ZarrBackend(reader, filename_prefix=tmp_filename.name)
+
+    return backend
+
+
 @pytest.fixture
-def small_backend():
-    return get_small_backend()
+def small_np_backend() -> NumpyBackend:
+    backend = get_small_np_backend()
+    assert backend.m is not None
+    return backend
+
+
+@pytest.fixture
+def small_zarr_backend() -> ZarrBackend:
+    return create_and_get_small_zarr_backend()
 
 
 @pytest.fixture

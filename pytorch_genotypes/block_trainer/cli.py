@@ -9,11 +9,12 @@ from typing import Dict
 from pkg_resources import resource_filename
 
 from pytorch_genotypes.dataset.core import FixedSizeChunks
-from ..dataset import BACKENDS
 
 from torch.utils.data import DataLoader, TensorDataset
-from models import ChildModel
 import pytorch_lightning as pl
+
+from .models import ChildModel
+from ..dataset import BACKENDS
 
 
 DEFAULT_TEMPLATE = resource_filename(
@@ -39,16 +40,16 @@ def train(args):
     epochs = 100
 
     trainer = pl.Trainer(
-        log_every_n_steps=1,  # set the logging frequency
+        log_every_n_steps=1,
         gpus=-1,  # use all GPUs
-        max_epochs=epochs,  # number of epochs
-        deterministic=False,  # keep it non-deterministic
-        auto_lr_find=True,  # Find the learning rate
+        max_epochs=epochs,
+        auto_lr_find=True,
     )
     trainer.fit(model, train_loader)
     print("-----------------------------------")
     print("Training process has finished. Saving trained model.")
     print("-----------------------------------")
+
     # Save model
     results_base = "chunk_checkpoints"
     os.makedirs(results_base)

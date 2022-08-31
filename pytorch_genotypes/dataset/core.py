@@ -6,6 +6,7 @@ can implement additional logic, for example to include phenotype data.
 
 """
 
+import logging
 import pickle
 from collections import defaultdict
 from typing import List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional
@@ -18,6 +19,9 @@ from torch.utils.data.dataset import Dataset
 
 if TYPE_CHECKING:
     import pandas as pd
+
+
+logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T", bound="GeneticDatasetBackend")
@@ -63,6 +67,28 @@ class GeneticDatasetBackend(object):
 
         """
         raise NotImplementedError()
+
+    def extract_range(
+        self,
+        left: int,
+        right: int,
+    ) -> torch.Tensor:
+        """Extract variants in a range of indices.
+
+        The default implementation is likely to be very inefficient because
+        it loops over the rows. Subclasses should provide more efficient
+        implementations.
+
+        """
+        logger.warning(
+            "The extract_range method may be slow for generic backends."
+        )
+
+        out = torch.empty((len(self), right - left + 1))
+        for i in range(len(self)):
+            out[i, :] = self[i][left:(right+1)]
+
+        return out
 
 
 class GeneticDataset(Dataset):
@@ -113,7 +139,7 @@ class _Chunk(object):
     def __repr__(self):
         return (
             f"<Chunk #{self.id} - "
-            f"{self.first_variant_index}:{self.last_variant_index}"
+            f"{self.first_variant_index}:{self.last_variant_index}>"
         )
 
 
@@ -203,8 +229,9 @@ class FixedSizeChunks(object):
 
     def get_tensor_for_chunk_id(self, chunk_id: int) -> torch.Tensor:
         chunk = self.get_chunk(chunk_id)
+        assert chunk.first_variant_index is not None
         assert chunk.last_variant_index is not None
-        return self.backend[
-            :,
-            chunk.first_variant_index:(chunk.last_variant_index+1)
-        ]
+
+        return self.backend.extract_range(
+            chunk.first_variant_index, chunk.last_variant_index
+        )

@@ -153,6 +153,9 @@ class ZarrBackend(GeneticDatasetBackend):
     def __getitem__(self, idx):
         return torch.tensor(self.cache.get_zarr_row(idx))
 
+    def extract_range(self, left: int, right: int) -> torch.Tensor:
+        return self.z.oindex[:, left:(right+1)]
+
 
 class VariantBufferedZarrWriter(object):
     def __init__(self, z, buf_size, dtype):
