@@ -2,3 +2,5 @@
 *.swp
 *__pycache__
 *.egg-info
+docs/build/
+lightning_logs/
