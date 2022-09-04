@@ -7,20 +7,20 @@ import torch.nn.functional as F
 class ChildModel(pl.LightningModule):
     def __init__(self, input_dim, n_hidden, lr=1e-3, drop=0.25, reg=1e-5):
         super().__init__()
+        self.save_hyperparameters()
+
         self.encoder = nn.Sequential(
-            nn.Dropout(
-                p=self.hparams.drop
-            ),
+            nn.Dropout(self.hparams.drop),
             nn.Linear(input_dim, n_hidden),
             nn.ReLU()
         )
+
         self.decoder = nn.Sequential(
             nn.Linear(n_hidden, input_dim),
             nn.ReLU(),
             nn.Linear(input_dim, 3 * input_dim),
             ReshapeLogSoftmax(n_snps=input_dim),
         )
-        self.save_hyperparameters()
 
     def forward(self, features):
         reconstruction = self.encoder(features)
@@ -30,7 +30,9 @@ class ChildModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # Training_step defined the train loop.
         # It is independent of forward
-        x, _ = batch
+        x = batch[0]
+        x = x.to(torch.float32)
+
         z = self.encoder(x)
         x_hat = self.decoder(z)
         loss = F.nll_loss(x_hat, torch.round(x).to(int))

@@ -48,7 +48,7 @@ class ChunkDropout(nn.Module):
         if weight_scaling:
             self._scaling_factor: Optional[Tensor] = torch.tensor(1)
             self._scaling_factor = (
-                1 / self.estimate_effective_dropout_rate()
+                1 / (1 - self.estimate_effective_dropout_rate())
             )
         else:
             self._scaling_factor = None
@@ -129,7 +129,7 @@ class ChunkDropout(nn.Module):
         n_dropped = torch.zeros(n_samples, dtype=torch.int)
 
         for i in range(n_samples):
-            n_dropped[i] = n - self(torch.ones(n)).sum()
+            n_dropped[i] = (self(torch.ones(n)) == 0).sum()
 
         return torch.mean(n_dropped / n)
 
@@ -166,6 +166,7 @@ def visualize_chunk_dropout(n, *args, **kwargs):
     import matplotlib.pyplot as plt
 
     mod = ChunkDropout(*args, **kwargs)
+    print(f"Effective dropout: {mod.estimate_effective_dropout_rate()}")
 
     matrices = []
     for _ in range(n):

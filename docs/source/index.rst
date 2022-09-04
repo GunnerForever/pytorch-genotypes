@@ -7,10 +7,11 @@ Welcome to Pytorch Genotypes's documentation!
 =============================================
 
 .. toctree::
+   :glob:
    :maxdepth: 2
    :caption: Contents:
 
-   dataset/backends
+   dataset/*
 
 Indices and tables
 ==================

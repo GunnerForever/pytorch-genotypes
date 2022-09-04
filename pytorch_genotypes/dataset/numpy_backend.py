@@ -150,26 +150,3 @@ class NumpyBackend(GeneticDatasetBackend):
     ) -> torch.Tensor:
         assert self.m is not None
         return torch.tensor(self.m[:, left:(right+1)])
-
-    def split_samples(self, n_samples):
-        n_left = n_samples
-
-        # Select indices.
-        indices = np.random.permutation(len(self))
-
-        left_indices = indices[:n_left]
-        right_indices = indices[n_left:]
-
-        def _apply_subset(o, indices):
-            if o._idx is not None:
-                o._idx = o._idx[indices]
-
-            o.samples = [o.samples[i] for i in indices]
-            o.m = self.m[indices, :]
-
-            return o
-
-        left_backend = _apply_subset(copy.copy(self), left_indices)
-        right_backend = _apply_subset(copy.copy(self), right_indices)
-
-        return left_backend, right_backend

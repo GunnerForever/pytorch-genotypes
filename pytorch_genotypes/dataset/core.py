@@ -12,9 +12,11 @@ from collections import defaultdict
 from typing import List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional
 
 import torch
+import numpy as np
 from geneparse import Variant
+from torch.utils.data.dataset import Dataset, TensorDataset
 
-from torch.utils.data.dataset import Dataset
+from .utils import TensorScaler
 
 
 if TYPE_CHECKING:
@@ -60,14 +62,6 @@ class GeneticDatasetBackend(object):
     def __len__(self) -> int:
         return self.get_n_samples()
 
-    def split_samples(self, n_samples: int):
-        """Split a backend sample-wise.
-
-        This is useful, for example, to create a test or validation set.
-
-        """
-        raise NotImplementedError()
-
     def extract_range(
         self,
         left: int,
@@ -92,9 +86,29 @@ class GeneticDatasetBackend(object):
 
 
 class GeneticDataset(Dataset):
-    def __init__(self, backend: GeneticDatasetBackend):
+    def __init__(
+        self,
+        backend: GeneticDatasetBackend
+    ):
         super().__init__()
         self.backend = backend
+        self.scaler = self.create_scaler()
+
+    def create_scaler(self) -> TensorScaler:
+        # Estimate scaling on max 2k rows.
+        n = len(self)
+
+        if n > 2000:
+            indices = np.sort(np.random.choice(
+                np.arange(n), size=2000, replace=False
+            ))
+
+            rows = [self.backend[i] for i in indices]
+            return TensorScaler(torch.vstack(rows))
+
+        else:
+            rows = [self.backend[i] for i in range(n)]
+            return TensorScaler(torch.vstack(rows))
 
     def load_full_dataset(self) -> Tuple[torch.Tensor, ...]:
         """Utility function to load everything in memory.
@@ -117,7 +131,15 @@ class GeneticDataset(Dataset):
         ))
 
     def __getitem__(self, idx):
-        return self.backend[idx]
+        """Genetic datasets provide the dosage and the standardized genotype.
+
+        To avoid test data leakage, it is important to initialize the scaler
+        without the test samples. Ensure that dataset splitting is done using
+        separate backends or that scalers are re-computed if needed.
+
+        """
+        geno_dosage = self.backend[idx]
+        return (geno_dosage, self.scaler.standardize_tensor(geno_dosage))
 
     def __len__(self) -> int:
         return len(self.backend)
@@ -235,3 +257,8 @@ class FixedSizeChunks(object):
         return self.backend.extract_range(
             chunk.first_variant_index, chunk.last_variant_index
         )
+
+    def get_dataset_for_chunk_id(self, chunk_id: int) -> Dataset:
+        chunk = self.get_tensor_for_chunk_id(chunk_id)
+        scaler = TensorScaler(chunk)
+        return TensorDataset(chunk, scaler.standardize_tensor(chunk))

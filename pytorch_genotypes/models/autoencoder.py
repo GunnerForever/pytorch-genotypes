@@ -35,21 +35,20 @@ class GenotypeProbabilisticAutoencoder(pl.LightningModule):
     """
     def __init__(
         self,
-        lr,
-        weight_decay,
         encoder: pl.LightningModule,
         decoder: pl.LightningModule,
+        lr=1e-3,
+        weight_decay=0,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.encoder = encoder
         self.decoder = decoder
 
-    def _step(self, batch, batch_idx, log, log_prefix=""):
-        geno_dosage = batch
+    def _step(self, geno_dosage, geno_std, batch_idx, log, log_prefix=""):
         hard_calls = dosage_to_hard_call(geno_dosage)
 
-        geno_logits = self.forward(geno_dosage)
+        geno_logits = self.forward(geno_std)
         reconstruction_dosage = 2 * expit(geno_logits)
 
         reconstruction_mse = F.mse_loss(geno_dosage, reconstruction_dosage)
@@ -78,12 +77,19 @@ class GenotypeProbabilisticAutoencoder(pl.LightningModule):
         return self.decode(self.encode(geno_std))
 
     def training_step(self, batch, batch_idx):
-        batch = batch.to(torch.float32)
-        return self._step(batch, batch_idx, log=True)
+        geno_dosage, geno_std = batch
+        geno_std = geno_std.to(torch.float32)
+        geno_dosage = geno_dosage.to(torch.float32)
+
+        return self._step(geno_dosage, geno_std, batch_idx, log=True)
 
     def test_step(self, batch, batch_idx):
-        batch = batch.to(torch.float32)
-        return self._step(batch, batch_idx, log=True, log_prefix="test")
+        geno_dosage, geno_std = batch
+        geno_std = geno_std.to(torch.float32)
+        geno_dosage = geno_dosage.to(torch.float32)
+
+        return self._step(geno_dosage, geno_std, batch_idx, log=True,
+                          log_prefix="test_")
 
     def configure_optimizers(self):
         return torch.optim.Adam(

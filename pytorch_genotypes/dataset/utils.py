@@ -32,37 +32,18 @@ def resolve_path(filename: str, contexts: Optional[List[str]] = None) -> str:
     raise FileNotFoundError(filename)
 
 
-def standardize_features(
-    matrix: TorchOrNumpyArray,
-    impute_to_mean=False
-) -> Tuple[TorchOrNumpyArray, TorchOrNumpyArray, TorchOrNumpyArray]:
-    """Standardize a design matrix of n_samples x n_features.
+class TensorScaler(object):
+    """Standardize a tensor of n_samples x n_features."""
+    def __init__(self, tensor: torch.Tensor):
+        tensor = tensor.to(torch.float32)
 
-    The return type is the standardized matrix, the vector used for centering
-    and the vector used for scaling (the standard deviation).
+        self.center = torch.nanmean(tensor, dim=0)
+        self.scale = torch.sqrt(
+            torch.nanmean((tensor - self.center) ** 2, dim=0)
+        )
 
-    TODO make better type annotations, e.g. using @overload.
-
-    """
-    center = np.nanmean(matrix, axis=0)
-    scale = np.nanstd(matrix, axis=0)
-
-    matrix -= center
-    matrix /= scale
-
-    if impute_to_mean:
-        matrix = np.nan_to_num(matrix, nan=0)
-
-    return (matrix, center, scale)
-
-
-def rescale_standardized(
-    matrix: TorchOrNumpyArray,
-    center: TorchOrNumpyArray,
-    scale: TorchOrNumpyArray,
-) -> TorchOrNumpyArray:
-    """Inverse operation of standardize_features(...)."""
-    return matrix * scale + center
+    def standardize_tensor(self, t: torch.Tensor):
+        return (t - self.center) / self.scale
 
 
 def get_selected_samples_and_indexer(

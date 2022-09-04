@@ -10,11 +10,17 @@ from pkg_resources import resource_filename
 
 from pytorch_genotypes.dataset.core import FixedSizeChunks
 
-from torch.utils.data import DataLoader, TensorDataset
+import torch
+from torch.utils.data import DataLoader, random_split
+import torch.nn as nn
 import pytorch_lightning as pl
+
+from pytorch_genotypes.modules.chunk_dropout import ChunkDropout
 
 from .models import ChildModel
 from ..dataset import BACKENDS
+from ..models import GenotypeProbabilisticAutoencoder
+from ..models.utils import build_mlp
 
 
 DEFAULT_TEMPLATE = resource_filename(
@@ -23,36 +29,86 @@ DEFAULT_TEMPLATE = resource_filename(
 
 
 def train(args):
+    lr = 2e-3
+    batch_size = 747
+    n_epochs = 500
+    rep_size = 128
+    test_proportion = 0.1
+    weight_decay = 1e-4
+
     print("-----------------------------------")
     print("Block Training Process Begin.")
     print("-----------------------------------")
     backend = BACKENDS[args.backend].load(args.backend_pickle_filename)
     chunks = FixedSizeChunks(backend, max_variants_per_chunk=args.chunk_size)
-    tensor_dataset = TensorDataset(
-        chunks.get_tensor_from_chunk_id(args.chunk_index)
+
+    genotypes_dataset = chunks.get_dataset_for_chunk_id(args.chunk_index)
+
+    n = backend.get_n_samples()
+
+    # Sample some test indices.
+    n_test = int(round(test_proportion * n))
+    n_train = n - n_test
+
+    train_dataset, test_dataset = random_split(
+        genotypes_dataset,
+        [n_train, n_test],
+        generator=torch.Generator().manual_seed(42)
     )
 
-    hidden_layer_units = 16
     train_loader = DataLoader(
-        tensor_dataset, batch_size=len(tensor_dataset), num_workers=0
+        train_dataset,
+        batch_size=n_train if batch_size == "full" else batch_size,
+        num_workers=2
     )
-    model = ChildModel(args.chunk_size, hidden_layer_units)
-    epochs = 100
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=n_test,
+        num_workers=1
+    )
+
+    # 1k, 128, 256 <> 256, 512, 1k (lr=1e-3, bs=512, epochs=1000)
+    enc_layers = build_mlp(
+        args.chunk_size, (128, rep_size),
+        activations=[nn.LeakyReLU()],
+        add_batchnorm=True
+    )
+    enc_layers.insert(
+        0,
+        ChunkDropout(args.chunk_size, 0.1, 1, 20, weight_scaling=True)
+        # Try long but few dropouts (effective ~15.4%). (BAD)
+        # ChunkDropout(args.chunk_size, 0.001, 300, 100, weight_scaling=True)
+    )
+    # enc_layers.insert(0, nn.Dropout(0.1748104989528656))
+
+    model = GenotypeProbabilisticAutoencoder(
+        encoder=nn.Sequential(*enc_layers),
+        decoder=nn.Sequential(*build_mlp(
+            rep_size, (128, ), args.chunk_size,
+            activations=[nn.LeakyReLU()],
+            add_batchnorm=True
+        )),
+        lr=lr,
+        weight_decay=weight_decay
+    )
 
     trainer = pl.Trainer(
         log_every_n_steps=1,
         gpus=-1,  # use all GPUs
-        max_epochs=epochs,
-        auto_lr_find=True,
+        max_epochs=n_epochs,
     )
     trainer.fit(model, train_loader)
+    trainer.test(model, test_loader)
     print("-----------------------------------")
     print("Training process has finished. Saving trained model.")
     print("-----------------------------------")
 
     # Save model
     results_base = "chunk_checkpoints"
-    os.makedirs(results_base)
+    if not os.path.isdir(results_base):
+        os.makedirs(results_base)
+
     checkpoint_filename = os.path.join(
         results_base, f"model-block-{args.chunk_index}.ckpt"
     )
