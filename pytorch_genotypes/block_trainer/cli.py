@@ -17,7 +17,6 @@ import pytorch_lightning as pl
 
 from pytorch_genotypes.modules.chunk_dropout import ChunkDropout
 
-from .models import ChildModel
 from ..dataset import BACKENDS
 from ..models import GenotypeProbabilisticAutoencoder
 from ..models.utils import build_mlp
@@ -28,11 +27,38 @@ DEFAULT_TEMPLATE = resource_filename(
 )
 
 
+REP_SIZE = 128
+
+
+def build_encoder(args):
+    # 1k, 128, 256 <> 256, 512, 1k (lr=1e-3, bs=512, epochs=1000)
+    enc_layers = build_mlp(
+        args.chunk_size, (128, REP_SIZE),
+        activations=[nn.LeakyReLU()],
+        add_batchnorm=True
+    )
+    enc_layers.insert(
+        0,
+        ChunkDropout(args.chunk_size, 0.1, 1, 20, weight_scaling=True)
+        # Try long but few dropouts (effective ~15.4%). (BAD)
+        # ChunkDropout(args.chunk_size, 0.001, 300, 100, weight_scaling=True)
+    )
+    # enc_layers.insert(0, nn.Dropout(0.1748104989528656))
+    return nn.Sequential(*enc_layers)
+
+
+def build_decoder(args):
+    return nn.Sequential(*build_mlp(
+        REP_SIZE, (128, ), args.chunk_size,
+        activations=[nn.LeakyReLU()],
+        add_batchnorm=True
+    ))
+
+
 def train(args):
     lr = 2e-3
     batch_size = 747
     n_epochs = 500
-    rep_size = 128
     test_proportion = 0.1
     weight_decay = 1e-4
 
@@ -68,27 +94,9 @@ def train(args):
         num_workers=1
     )
 
-    # 1k, 128, 256 <> 256, 512, 1k (lr=1e-3, bs=512, epochs=1000)
-    enc_layers = build_mlp(
-        args.chunk_size, (128, rep_size),
-        activations=[nn.LeakyReLU()],
-        add_batchnorm=True
-    )
-    enc_layers.insert(
-        0,
-        ChunkDropout(args.chunk_size, 0.1, 1, 20, weight_scaling=True)
-        # Try long but few dropouts (effective ~15.4%). (BAD)
-        # ChunkDropout(args.chunk_size, 0.001, 300, 100, weight_scaling=True)
-    )
-    # enc_layers.insert(0, nn.Dropout(0.1748104989528656))
-
     model = GenotypeProbabilisticAutoencoder(
-        encoder=nn.Sequential(*enc_layers),
-        decoder=nn.Sequential(*build_mlp(
-            rep_size, (128, ), args.chunk_size,
-            activations=[nn.LeakyReLU()],
-            add_batchnorm=True
-        )),
+        encoder=build_encoder(args),
+        decoder=build_decoder(args),
         lr=lr,
         weight_decay=weight_decay
     )
