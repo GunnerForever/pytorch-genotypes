@@ -9,7 +9,7 @@ can implement additional logic, for example to include phenotype data.
 import logging
 import pickle
 from collections import defaultdict
-from typing import List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional
+from typing import List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional, Union
 
 import torch
 import numpy as np
@@ -88,13 +88,23 @@ class GeneticDatasetBackend(object):
 class GeneticDataset(Dataset):
     def __init__(
         self,
-        backend: GeneticDatasetBackend
+        backend: GeneticDatasetBackend,
+        genotype_standardization: bool = True
     ):
         super().__init__()
         self.backend = backend
-        self.scaler = self.create_scaler()
+        if genotype_standardization:
+            self.scaler: Union[TensorScaler, None] = self.create_scaler()
+        else:
+            self.scaler = None
 
     def create_scaler(self) -> TensorScaler:
+        """Column-wise (genotype) scaler.
+
+        This method is defined at the datset level because it is important
+        not to use test data to estimate scaling to avoid information leakage.
+
+        """
         # Estimate scaling on max 2k rows.
         n = len(self)
 
@@ -102,13 +112,22 @@ class GeneticDataset(Dataset):
             indices = np.sort(np.random.choice(
                 np.arange(n), size=2000, replace=False
             ))
-
-            rows = [self.backend[i] for i in indices]
-            return TensorScaler(torch.vstack(rows))
-
+            n = 2000
         else:
-            rows = [self.backend[i] for i in range(n)]
-            return TensorScaler(torch.vstack(rows))
+            indices = np.arange(n)
+
+        print("Init mat")
+        mat = torch.empty(
+            (n, self.backend.get_n_variants()),
+            dtype=torch.float32
+        )
+
+        print("Filling")
+        for mat_index, index in enumerate(indices):
+            mat[mat_index, :] = self.backend[index]
+
+        print("Init scaler")
+        return TensorScaler(mat)
 
     def load_full_dataset(self) -> Tuple[torch.Tensor, ...]:
         """Utility function to load everything in memory.
@@ -139,7 +158,11 @@ class GeneticDataset(Dataset):
 
         """
         geno_dosage = self.backend[idx]
-        return (geno_dosage, self.scaler.standardize_tensor(geno_dosage))
+
+        if self.scaler is not None:
+            return (geno_dosage, self.scaler.standardize_tensor(geno_dosage))
+        else:
+            return (geno_dosage, )
 
     def __len__(self) -> int:
         return len(self.backend)

@@ -27,40 +27,41 @@ DEFAULT_TEMPLATE = resource_filename(
 )
 
 
-REP_SIZE = 128
+REP_SIZE = 256
 
 
 def build_encoder(args):
     # 1k, 128, 256 <> 256, 512, 1k (lr=1e-3, bs=512, epochs=1000)
-    enc_layers = build_mlp(
-        args.chunk_size, (128, REP_SIZE),
+    enc_layers = [
+        nn.BatchNorm1d(args.chunk_size),
+    ]
+
+    enc_layers.extend(build_mlp(
+        args.chunk_size, (712, ), REP_SIZE,
         activations=[nn.LeakyReLU()],
         add_batchnorm=True
-    )
-    enc_layers.insert(
-        0,
-        ChunkDropout(args.chunk_size, 0.1, 1, 20, weight_scaling=True)
-        # Try long but few dropouts (effective ~15.4%). (BAD)
-        # ChunkDropout(args.chunk_size, 0.001, 300, 100, weight_scaling=True)
-    )
-    # enc_layers.insert(0, nn.Dropout(0.1748104989528656))
+    ))
+    # ChunkDropout(args.chunk_size, 0.1, 1, 20, weight_scaling=True)
+    # Try long but few dropouts (effective ~15.4%). (BAD)
+    # ChunkDropout(args.chunk_size, 0.001, 300, 100, weight_scaling=True)
     return nn.Sequential(*enc_layers)
 
 
 def build_decoder(args):
-    return nn.Sequential(*build_mlp(
-        REP_SIZE, (128, ), args.chunk_size,
-        activations=[nn.LeakyReLU()],
-        add_batchnorm=True
-    ))
+    return nn.Linear(REP_SIZE, args.chunk_size)
+    # return nn.Sequential(*build_mlp(
+    #     REP_SIZE, (128, ), args.chunk_size,
+    #     activations=[nn.LeakyReLU()],
+    #     add_batchnorm=True
+    # ))
 
 
 def train(args):
-    lr = 2e-3
-    batch_size = 747
+    lr = 1e-3
+    batch_size = 256
     n_epochs = 500
     test_proportion = 0.1
-    weight_decay = 1e-4
+    weight_decay = 0  # 1e-5
 
     print("-----------------------------------")
     print("Block Training Process Begin.")

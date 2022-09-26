@@ -90,8 +90,8 @@ class NumpyBackend(GeneticDatasetBackend):
         m = m[:, :cur_column]
 
         self.variants = variants
-        self.m: Optional[np.ndarray] = m
         np.savez_compressed(self.npz_filename, m)
+        self.m: Optional[torch.Tensor] = torch.tensor(m)
 
     @classmethod
     def load(cls, filename: str) -> "NumpyBackend":
@@ -111,7 +111,7 @@ class NumpyBackend(GeneticDatasetBackend):
                 ]
 
             filename = resolve_path(o.npz_filename, contexts=contexts)
-            o.m = np.load(filename)["arr_0"]
+            o.m = torch.tensor(np.load(filename)["arr_0"])
 
         return o
 
@@ -127,9 +127,11 @@ class NumpyBackend(GeneticDatasetBackend):
     def __getitem__(self, idx):
         if self.m is None:
             # Try to lazily load the numpy matrix.
-            self.m = np.load(resolve_path(self.npz_filename))["arr_0"]
+            self.m = torch.tensor(
+                np.load(resolve_path(self.npz_filename))["arr_0"]
+            )
 
-        return torch.tensor(self.m[idx, :])
+        return self.m[idx, :]
 
     def get_samples(self):
         return self.samples
@@ -149,4 +151,4 @@ class NumpyBackend(GeneticDatasetBackend):
         right: int,
     ) -> torch.Tensor:
         assert self.m is not None
-        return torch.tensor(self.m[:, left:(right+1)])
+        return self.m[:, left:(right+1)]
