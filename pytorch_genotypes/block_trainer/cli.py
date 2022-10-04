@@ -5,6 +5,7 @@ Command-line interface entrypoint for the block trainer utility tool.
 
 import os
 import argparse
+import pprint
 from typing import Dict
 from pkg_resources import resource_filename
 
@@ -14,12 +15,18 @@ import torch
 from torch.utils.data import DataLoader, random_split
 import torch.nn as nn
 import pytorch_lightning as pl
-
-from pytorch_genotypes.modules.chunk_dropout import ChunkDropout
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 from ..dataset import BACKENDS
 from ..models import GenotypeProbabilisticAutoencoder
 from ..models.utils import build_mlp
+
+
+try:
+    from orion.client import report_objective
+    ORION_SWEEP = True
+except ImportError:
+    ORION_SWEEP = False
 
 
 DEFAULT_TEMPLATE = resource_filename(
@@ -27,41 +34,72 @@ DEFAULT_TEMPLATE = resource_filename(
 )
 
 
-REP_SIZE = 256
+DEFAULT_CONFIG = resource_filename(
+    __name__, os.path.join("command_templates",
+                           "block_trainer_model_config.py")
+)
 
 
-def build_encoder(args):
+def build_encoder(args, config):
     # 1k, 128, 256 <> 256, 512, 1k (lr=1e-3, bs=512, epochs=1000)
+    # We use input batchnorm to scale the variants.
     enc_layers = [
         nn.BatchNorm1d(args.chunk_size),
     ]
 
+    # Input dropout.
+    if config["input_dropout_p"] is not None:
+        enc_layers.append(nn.Dropout(config["input_dropout_p"]))
+
+    # Activation and hidden layer dropout.
+    activations = [getattr(nn, config["model/activations"])()]
+    if config["enc_h_dropout_p"] is not None:
+        activations.append(nn.Dropout(config["enc_h_dropout_p"]))
+
+    # Rest of the architecture.
     enc_layers.extend(build_mlp(
-        args.chunk_size, (712, ), REP_SIZE,
-        activations=[nn.LeakyReLU()],
-        add_batchnorm=True
+        args.chunk_size,
+        tuple(config["model/enc_layers"]),
+        config["model/rep_size"],
+        activations=activations,
+        add_batchnorm=config["add_batchnorm"]
     ))
-    # ChunkDropout(args.chunk_size, 0.1, 1, 20, weight_scaling=True)
-    # Try long but few dropouts (effective ~15.4%). (BAD)
-    # ChunkDropout(args.chunk_size, 0.001, 300, 100, weight_scaling=True)
+
     return nn.Sequential(*enc_layers)
 
 
-def build_decoder(args):
-    return nn.Linear(REP_SIZE, args.chunk_size)
-    # return nn.Sequential(*build_mlp(
-    #     REP_SIZE, (128, ), args.chunk_size,
-    #     activations=[nn.LeakyReLU()],
-    #     add_batchnorm=True
-    # ))
+def build_decoder(args, config):
+    activations = [getattr(nn, config["model/activations"])()]
+    if config["dec_h_dropout_p"] is not None:
+        activations.append(nn.Dropout(config["dec_h_dropout_p"]))
+
+    dec_layers = build_mlp(
+        config["model/rep_size"], config["model/dec_layers"], args.chunk_size,
+        add_batchnorm=config["add_batchnorm"],
+        activations=activations
+    )
+
+    return nn.Sequential(*dec_layers)
+
+
+def parse_config(filename):
+    conf_global = {}
+    with open(filename) as f:
+        script = f.read()
+        exec(script, conf_global)
+
+    conf = conf_global["get_block_trainer_config"]()
+    assert isinstance(conf, dict)
+    return conf
 
 
 def train(args):
-    lr = 1e-3
-    batch_size = 256
-    n_epochs = 500
+    config = parse_config(args.config)
+
+    print("Current model configuration:")
+    pprint.pprint(config)
+
     test_proportion = 0.1
-    weight_decay = 0  # 1e-5
 
     print("-----------------------------------")
     print("Block Training Process Begin.")
@@ -85,7 +123,7 @@ def train(args):
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=n_train if batch_size == "full" else batch_size,
+        batch_size=config["batch_size"],
         num_workers=2
     )
 
@@ -96,19 +134,39 @@ def train(args):
     )
 
     model = GenotypeProbabilisticAutoencoder(
-        encoder=build_encoder(args),
-        decoder=build_decoder(args),
-        lr=lr,
-        weight_decay=weight_decay
+        encoder=build_encoder(args, config),
+        decoder=build_decoder(args, config),
+        lr=config["lr"],
+        weight_decay=config["weight_decay"]
+    )
+
+    logger = None
+    if args.wandb_logger:
+        from pytorch_lightning.loggers import WandbLogger
+        wandb_logger = WandbLogger(
+            project=f"block_trainer_block_{args.chunk_index}"
+        )
+        logger = wandb_logger
+
+    stop_if_nan = EarlyStopping(
+        monitor="reconstruction_nll",
+        check_finite=True
     )
 
     trainer = pl.Trainer(
         log_every_n_steps=1,
-        gpus=-1,  # use all GPUs
-        max_epochs=n_epochs,
+        accelerator="gpu",
+        devices=-1,  # use all GPUs
+        max_epochs=config["max_epochs"],
+        logger=logger,
+        callbacks=[stop_if_nan]
     )
     trainer.fit(model, train_loader)
-    trainer.test(model, test_loader)
+    test_results = trainer.test(model, test_loader)[0]
+
+    if ORION_SWEEP:
+        report_objective(test_results["test_reconstruction_nll"])
+
     print("-----------------------------------")
     print("Training process has finished. Saving trained model.")
     print("-----------------------------------")
@@ -223,5 +281,11 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="mode")
     exec_parser = subparsers.add_parser("train")
     exec_parser.add_argument("--chunk-index", required=True, type=int)
+    exec_parser.add_argument(
+        "--config", default=DEFAULT_CONFIG,
+        help=f"Python configuration file for hyperparameters and autoencoder "
+             f"model. See {DEFAULT_CONFIG} for an example."
+    )
+    exec_parser.add_argument("--wandb-logger", action="store_true")
 
     return parser.parse_args()

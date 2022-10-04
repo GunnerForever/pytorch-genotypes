@@ -1,0 +1,35 @@
+def get_block_trainer_config():
+    lr = lr~loguniform(1e-5, 0.01)
+    fidelity = fidelity~fidelity(low=1, high=100)
+
+    max_epochs = min(100 * fidelity, 500)
+
+    weight_decay = weight_decay~loguniform(1e-10, 1e-3)
+
+    add_batchnorm = add_batchnorm~choices([True, False])
+    batch_size = batch_size~uniform(128, 512, discrete=True)
+
+    input_dropout_p = input_dropout_p~uniform(0, 0.2)
+    enc_h_dropout_p = enc_h_dropout_p~uniform(0, 0.5)
+
+    activations = "model/activations~choices(["LeakyReLU", "ReLU", "GELU"])"
+    rep_size = model/rep_size~uniform(32, 512, discrete=True)
+
+    enc_h1 = model/h1~uniform(64, 2000, discrete=True)
+    enc_h2 = model/h2~uniform(64, 1000, discrete=True)
+    enc_h3 = model/h3~uniform(64, 1000, discrete=True)
+
+    return {
+        "lr": lr,
+        "max_epochs": max_epochs,
+        "batch_size": batch_size,
+        "weight_decay": weight_decay,
+        "add_batchnorm": add_batchnorm,
+        "input_dropout_p": input_dropout_p,
+        "enc_h_dropout_p": enc_h_dropout_p,
+        "dec_h_dropout_p": None,
+        "model/activations": activations,
+        "model/rep_size": rep_size,
+        "model/enc_layers": [h for h in (enc_h1, enc_h2, enc_h3) if h != 0],
+        "model/dec_layers": [],
+    }
