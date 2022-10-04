@@ -49,22 +49,25 @@ class ZarrBackend(GeneticDatasetBackend):
     def __init__(
         self,
         reader: GenotypesReader,
-        filename_prefix: str,
+        prefix: str,
+        zarr_root: Optional[zarr.Group] = None,
         keep_samples: Optional[Set[str]] = None,
         variant_predicates: Optional[Iterable[VariantPredicate]] = None,
         chunks: Tuple[int, int] = (100_000, 10_000),
         dtype: DTypeLike = np.float16,
         progress: bool = True
     ):
-        self.prefix = filename_prefix
+        self.prefix = prefix
         self.variants: List[Variant] = []
 
         self.samples, self._idx = get_selected_samples_and_indexer(
             reader, keep_samples
         )
 
-        self.create_zarr(reader, variant_predicates, chunks, dtype, progress)
-        self.cache = ZarrCache(self.z)
+        self.create_zarr(
+            zarr_root, reader, variant_predicates, chunks, dtype, progress
+        )
+        self.cache = ZarrCache(self._z)
 
     def get_samples(self):
         return self.samples
@@ -80,6 +83,7 @@ class ZarrBackend(GeneticDatasetBackend):
 
     def create_zarr(
         self,
+        zarr_root,
         reader: GenotypesReader,
         predicates: Optional[Iterable[VariantPredicate]],
         chunks: Tuple[int, int],
@@ -87,33 +91,51 @@ class ZarrBackend(GeneticDatasetBackend):
         progress: bool
     ):
         """Create the zarr array from the genotypes reader."""
-        # We initialize the zarr file with the dimensions of the geneparse
-        # reader. It is likely that the final number of variants will be
-        # smaller because of variants failing a predicate. In that case the
-        # zarr array will be resized.
+        if zarr_root is None:
+            self._create_zarr_local(reader, chunks, dtype)
+        else:
+            self._create_zarr_in_group(reader, zarr_root, chunks, dtype)
+
+        self._fill_array(reader, predicates, dtype, progress)
+
+    def _create_zarr_in_group(self, reader, zarr_root, chunks, dtype):
+        self._local = False
+        n_samples = self.get_n_samples()
+        n_variants = reader.get_number_variants()
+        self._z = zarr_root.create_dataset(
+            self.prefix,
+            shape=(n_samples, n_variants),
+            chunks=chunks,
+            dtype=dtype
+        )
+
+    def _create_zarr_local(self, reader, chunks, dtype):
+        self._local = True
+        n_samples = self.get_n_samples()
+        n_variants = reader.get_number_variants()
+
         if self.prefix.endswith(".zarr"):
             zarr_filename = self.prefix
         else:
             zarr_filename = f"{self.prefix}.zarr"
 
         self._zarr_filename = zarr_filename
-
-        n_variants = reader.get_number_variants()
-        n_samples = self.get_n_samples()
-        z = zarr.open(
+        self._z = zarr.open(
             zarr_filename,
             mode="w",
             shape=(n_samples, n_variants),
             chunks=chunks,
             dtype=dtype
         )
-        variants = []
 
+    def _fill_array(self, reader, predicates, dtype, progress):
+        variants = []
         # We target using ~8GB of memory max. Making this configurable would
         # be nice. Assuming geneparse uses float64.
+        n_samples = self.get_n_samples()
         buf_size = round(8e9 / (n_samples * 8))
 
-        with VariantBufferedZarrWriter(z, buf_size, dtype) as zarr_writer:
+        with VariantBufferedZarrWriter(self._z, buf_size, dtype) as zarr_writer:  # noqa: E501
             if progress:
                 iterator = tqdm(
                     reader.iter_genotypes(),
@@ -133,28 +155,33 @@ class ZarrBackend(GeneticDatasetBackend):
                 else:
                     zarr_writer.add(g.genotypes[self._idx])
 
-        # Resize to match the number of variants.
-        z.resize(n_samples, len(variants))
-
-        self.z = z
+        # We initialize the zarr file with the dimensions of the geneparse
+        # reader. It is likely that the final number of variants will be
+        # smaller because of variants failing a predicate. In that case the
+        # zarr array will be resized.
+        self._z.resize(n_samples, len(variants))
         self.variants = variants
 
     def __getstate__(self):
         d = self.__dict__.copy()
-        d.pop("z")
+        if self._local:
+            d.pop("_z")
+
         d.pop("cache")
         return d
 
     def __setstate__(self, state):
         super().__setstate__(state)
-        self.z = zarr.open(self._zarr_filename)
-        self.cache = ZarrCache(self.z)
+        if self._local:
+            self._z = zarr.open(self._zarr_filename)
+
+        self.cache = ZarrCache(self._z)
 
     def __getitem__(self, idx):
         return torch.tensor(self.cache.get_zarr_row(idx))
 
     def extract_range(self, left: int, right: int) -> torch.Tensor:
-        return self.z.oindex[:, left:(right+1)]
+        return self._z.oindex[:, left:(right+1)]
 
 
 class VariantBufferedZarrWriter(object):
@@ -175,7 +202,7 @@ class VariantBufferedZarrWriter(object):
         mat = np.vstack(self.buffer).astype(self.dtype).T
         self.buffer = []
         right_boundary = self.cur_j + mat.shape[1]
-        self.z[:, self.cur_j:right_boundary] = mat
+        self.z.oindex[:, self.cur_j:right_boundary] = mat
 
         self.cur_j = right_boundary
 
