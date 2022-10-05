@@ -6,6 +6,7 @@ import tempfile
 import itertools
 
 import pytest
+import torch
 import numpy as np
 from pkg_resources import resource_filename
 
@@ -29,12 +30,12 @@ def get_small_np_backend():
 
     # The backend was created with lazy_pickle = True meaning that we need
     # to read the numpy matrix ourselves.
-    backend.m = np.load(
+    backend.m = torch.from_numpy(np.load(
         resource_filename(
             __name__,
             os.path.join("test_data", "1kg_common_norel_thinned25.npz")
         )
-    )["arr_0"]
+    )["arr_0"])
 
     return backend
 
@@ -51,7 +52,7 @@ def create_and_get_small_zarr_backend():
     reader = geneparse.parsers["plink"](plink_prefix)
 
     tmp_filename = tempfile.NamedTemporaryFile()
-    backend = ZarrBackend(reader, filename_prefix=tmp_filename.name)
+    backend = ZarrBackend(reader, prefix=tmp_filename.name)
 
     return backend
 

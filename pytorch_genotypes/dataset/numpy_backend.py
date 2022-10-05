@@ -111,7 +111,7 @@ class NumpyBackend(GeneticDatasetBackend):
                 ]
 
             filename = resolve_path(o.npz_filename, contexts=contexts)
-            o.m = torch.tensor(np.load(filename)["arr_0"])
+            o.m = torch.from_numpy(np.load(filename)["arr_0"])
 
         return o
 
@@ -127,7 +127,7 @@ class NumpyBackend(GeneticDatasetBackend):
     def __getitem__(self, idx):
         if self.m is None:
             # Try to lazily load the numpy matrix.
-            self.m = torch.tensor(
+            self.m = torch.from_numpy(
                 np.load(resolve_path(self.npz_filename))["arr_0"]
             )
 

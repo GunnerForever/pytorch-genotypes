@@ -177,8 +177,8 @@ class ZarrBackend(GeneticDatasetBackend):
 
         self.cache = ZarrCache(self._z)
 
-    def __getitem__(self, idx):
-        return torch.tensor(self.cache.get_zarr_row(idx))
+    def __getitem__(self, idx) -> torch.Tensor:
+        return self.cache.get_zarr_row(idx)
 
     def extract_range(self, left: int, right: int) -> torch.Tensor:
         return self._z.oindex[:, left:(right+1)]
