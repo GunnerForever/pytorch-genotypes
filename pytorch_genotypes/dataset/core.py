@@ -8,8 +8,11 @@ can implement additional logic, for example to include phenotype data.
 
 import logging
 import pickle
-from collections import defaultdict
-from typing import List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional, Union
+import itertools
+from collections import defaultdict, OrderedDict
+from typing import (
+    List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional, Union, Any
+)
 
 import torch
 import numpy as np
@@ -27,6 +30,64 @@ logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T", bound="GeneticDatasetBackend")
+
+
+# Return a callable that takes *args -> named tuple like.
+class Batch(object):
+    __slots__ = ("name", "fields", "payload", "_key_to_index")
+
+    def __init__(self, name, fields, *payload):
+        self.name = name
+        self.fields = fields
+        self.payload: List[Any] = payload
+
+        self._key_to_index = {k: i for i, k in enumerate(fields)}
+
+    def __repr__(self) -> str:
+        s = f"<{self.name} - "
+        parts = []
+        for field, value in zip(self.fields, self.payload):
+            if isinstance(value, torch.Tensor):
+                shape = "x".join([str(i) for i in value.shape])
+                value = f"Tensor<{shape}>"
+
+            parts.append(f"{field}={value}")
+
+        return s + ", ".join(parts) + ">"
+
+    def __getattr__(self, __name: str) -> Any:
+        return self.payload[self._key_to_index[__name]]
+
+    def __getitem__(self, k: int) -> Any:
+        return self.payload[k]
+
+    def __len__(self) -> int:
+        return len(self.fields)
+
+
+class BatchFactory(object):
+    def __init__(self, name: str, fields: Tuple[str, ...]):
+        self.name = name
+        self.fields = fields
+
+    def __call__(self, *payload) -> Batch:
+        return Batch(self.name, self.fields, *payload)
+
+    @classmethod
+    def union(cls, name, *batches: "BatchFactory") -> "BatchFactory":
+        fields = tuple(OrderedDict.fromkeys(
+            itertools.chain(*[batch.fields for batch in batches])
+        ))
+
+        return BatchFactory(name, fields)
+
+
+BatchDosage = BatchFactory("BatchDosage", ("dosage", ))
+
+
+BatchDosageStandardized = BatchFactory(
+    "BatchDosageStandardized", ("dosage", "std_genotype")
+)
 
 
 class GeneticDatasetBackend(object):
@@ -139,7 +200,7 @@ class GeneticDataset(Dataset):
         tensors = defaultdict(list)
 
         for i in range(len(self)):
-            datum: Tuple[torch.Tensor, ...] = self[i]
+            datum: Batch = self[i]
 
             for j in range(len(datum)):
                 tensors[j].append(datum[j])
@@ -149,7 +210,7 @@ class GeneticDataset(Dataset):
             torch.vstack(tensors[j]) for j in range(len(tensors))
         ))
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> Batch:
         """Genetic datasets provide the dosage and the standardized genotype.
 
         To avoid test data leakage, it is important to initialize the scaler
@@ -160,9 +221,12 @@ class GeneticDataset(Dataset):
         geno_dosage = self.backend[idx]
 
         if self.scaler is not None:
-            return (geno_dosage, self.scaler.standardize_tensor(geno_dosage))
+            return BatchDosageStandardized(
+                geno_dosage,
+                self.scaler.standardize_tensor(geno_dosage)
+            )
         else:
-            return (geno_dosage, )
+            return BatchDosage(geno_dosage)
 
     def __len__(self) -> int:
         return len(self.backend)

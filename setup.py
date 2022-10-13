@@ -25,7 +25,7 @@ setup(
     packages=find_packages(),
     package_data={
         "pytorch_genotypes.tests": ["test_data/*"],
-        "pytorch_genotypes.block_trainer": ["command_templates/*"]
+        "pytorch_genotypes.block_trainer": ["config_files/*"]
     },
     install_requires=[
         "cyvcf2",

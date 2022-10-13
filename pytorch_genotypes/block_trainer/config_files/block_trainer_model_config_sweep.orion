@@ -28,6 +28,7 @@ def get_block_trainer_config():
         "input_dropout_p": input_dropout_p,
         "enc_h_dropout_p": enc_h_dropout_p,
         "dec_h_dropout_p": None,
+        "val_proportion": 0.1,
         "model/activations": activations,
         "model/rep_size": rep_size,
         "model/enc_layers": [h for h in (enc_h1, enc_h2, enc_h3) if h != 0],

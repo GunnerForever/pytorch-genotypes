@@ -1,2 +1,2 @@
-from .autoencoder import GenotypeProbabilisticAutoencoder
-from .mlp import MLP
+from .autoencoder import GenotypeAutoencoder  # noqa: F401
+from .mlp import MLP  # noqa: F401

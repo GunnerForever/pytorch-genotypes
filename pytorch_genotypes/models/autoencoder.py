@@ -19,7 +19,7 @@ import pytorch_lightning as pl
 from ..utils import dosage_to_hard_call
 
 
-class GenotypeProbabilisticAutoencoder(pl.LightningModule):
+class GenotypeAutoencoder(pl.LightningModule):
     """Genotype autoencoder that predicts individual minor allele frequency.
 
     The output of the decoder is a vector of probabilities (actually logits)
@@ -40,7 +40,7 @@ class GenotypeProbabilisticAutoencoder(pl.LightningModule):
         weight_decay=1e-3,
     ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["encoder", "decoder"])
         self.encoder = encoder
         self.decoder = decoder
 
@@ -80,25 +80,25 @@ class GenotypeProbabilisticAutoencoder(pl.LightningModule):
         return self.decode(self.encode(x))
 
     def training_step(self, batch, batch_idx):
-        if len(batch) == 2:
-            geno_dosage, _ = batch
-        else:
-            geno_dosage = batch[0]
+        dosage = self._get_dosage_from_batch(batch)
+        return self._step(dosage, batch_idx, log=True)
 
-        # Scale dosage by 2 so that values are 0, 0.5, 1.
-        geno_dosage = geno_dosage.to(torch.float32) / 2
-
-        return self._step(geno_dosage, batch_idx, log=True)
+    def validation_step(self, batch, batch_idx):
+        dosage = self._get_dosage_from_batch(batch)
+        return self._step(dosage, batch_idx, log=True, log_prefix="val_")
 
     def test_step(self, batch, batch_idx):
+        dosage = self._get_dosage_from_batch(batch)
+        return self._step(dosage, batch_idx, log=True, log_prefix="test_")
+
+    @staticmethod
+    def _get_dosage_from_batch(batch):
         if len(batch) == 2:
             geno_dosage, _ = batch
         else:
             geno_dosage = batch[0]
 
-        geno_dosage = geno_dosage.to(torch.float32)
-
-        return self._step(geno_dosage, batch_idx, log=True, log_prefix="test_")
+        return geno_dosage.to(torch.float32)
 
     def configure_optimizers(self):
         return torch.optim.Adam(

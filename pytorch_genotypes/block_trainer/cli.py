@@ -18,8 +18,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 from ..dataset import BACKENDS
-from ..models import GenotypeProbabilisticAutoencoder
-from ..models.utils import build_mlp
+from ..models import GenotypeAutoencoder, MLP
 
 
 try:
@@ -30,56 +29,42 @@ except ImportError:
 
 
 DEFAULT_TEMPLATE = resource_filename(
-    __name__, os.path.join("command_templates", "block_trainer_bash.sh")
+    __name__, os.path.join("config_files", "block_trainer_bash.sh")
 )
 
 
 DEFAULT_CONFIG = resource_filename(
-    __name__, os.path.join("command_templates",
-                           "block_trainer_model_config.py")
+    __name__, os.path.join("config_files", "block_trainer_model_config.py")
 )
 
 
 def build_encoder(args, config):
-    # 1k, 128, 256 <> 256, 512, 1k (lr=1e-3, bs=512, epochs=1000)
-    # We use input batchnorm to scale the variants.
-    enc_layers = [
-        nn.BatchNorm1d(args.chunk_size),
-    ]
-
-    # Input dropout.
-    if config["input_dropout_p"] is not None:
-        enc_layers.append(nn.Dropout(config["input_dropout_p"]))
-
-    # Activation and hidden layer dropout.
-    activations = [getattr(nn, config["model/activations"])()]
-    if config["enc_h_dropout_p"] is not None:
-        activations.append(nn.Dropout(config["enc_h_dropout_p"]))
-
-    # Rest of the architecture.
-    enc_layers.extend(build_mlp(
+    return MLP(
         args.chunk_size,
-        tuple(config["model/enc_layers"]),
+        config["model/enc_layers"],
         config["model/rep_size"],
-        activations=activations,
-        add_batchnorm=config["add_batchnorm"]
-    ))
-
-    return nn.Sequential(*enc_layers)
+        None,
+        use_dosage=True,
+        add_hidden_layer_batchnorm=config["add_batchnorm"],
+        add_input_layer_batchnorm=True,
+        input_dropout_p=config["input_dropout_p"],
+        hidden_dropout_p=config["enc_h_dropout_p"],
+        activations=[getattr(nn, config["model/activations"])()]
+    )
 
 
 def build_decoder(args, config):
-    activations = [getattr(nn, config["model/activations"])()]
-    if config["dec_h_dropout_p"] is not None:
-        activations.append(nn.Dropout(config["dec_h_dropout_p"]))
-
-    dec_layers = build_mlp(
-        config["model/rep_size"], config["model/dec_layers"], args.chunk_size,
-        add_batchnorm=config["add_batchnorm"],
-        activations=activations
+    return MLP(
+        config["model/rep_size"],
+        config["model/dec_layers"],
+        args.chunk_size,
+        None,
+        add_hidden_layer_batchnorm=config["add_batchnorm"],
+        add_input_layer_batchnorm=True,
+        input_dropout_p=False,  # No dropout at repr. level.
+        hidden_dropout_p=config["dec_h_dropout_p"],
+        activations=[getattr(nn, config["model/activations"])()]
     )
-
-    return nn.Sequential(*dec_layers)
 
 
 def parse_config(filename):
@@ -133,7 +118,7 @@ def train(args):
         num_workers=1
     )
 
-    model = GenotypeProbabilisticAutoencoder(
+    model = GenotypeAutoencoder(
         encoder=build_encoder(args, config),
         decoder=build_decoder(args, config),
         lr=config["lr"],

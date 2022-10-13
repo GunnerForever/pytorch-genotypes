@@ -4,7 +4,7 @@ from typing import Tuple, Optional, Iterable, List
 
 def build_mlp(
     _in: int,
-    hidden: Tuple[int],
+    hidden: Tuple[int, ...],
     out: Optional[int] = None,
     add_batchnorm: bool = False,
     activations: Iterable[nn.Module] = [nn.LeakyReLU()]

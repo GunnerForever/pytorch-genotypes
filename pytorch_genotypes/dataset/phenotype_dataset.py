@@ -3,17 +3,38 @@ Implementation of a dataset that add phenotype data.
 """
 
 
-from typing import Optional, List
 from dataclasses import dataclass
+from typing import List, Optional
 
-import torch
-import pandas as pd
 import numpy as np
+import pandas as pd
+import torch
 
-from .core import GeneticDataset, GeneticDatasetBackend
-
+from .core import (BatchDosage, BatchDosageStandardized, BatchFactory,
+                   GeneticDataset, GeneticDatasetBackend)
 
 _STANDARDIZE_MAX_SAMPLE = 10_000
+
+
+BatchExogenous = BatchFactory("BatchExogenous", ("exogenous", ))
+BatchEndogenous = BatchFactory("BatchEndogenous", ("endogenous", ))
+BatchExogenousEndogenous = BatchFactory(
+    "BatchExogenousEndogenous", ("exogenous", "endogenous")
+)
+
+
+def _get_phenotype_batch_factory(
+    has_exog: bool,
+    has_endog: bool
+) -> BatchFactory:
+    if has_exog and has_endog:
+        return BatchExogenousEndogenous
+    elif has_exog and (not has_endog):
+        return BatchExogenous
+    elif has_endog and (not has_exog):
+        return BatchEndogenous
+    else:
+        raise ValueError()
 
 
 @dataclass
@@ -47,6 +68,10 @@ class PhenotypeGeneticDataset(GeneticDataset):
         standardize_genotypes: bool = True
     ):
         super().__init__(backend)
+
+        if exogenous_columns is None and endogenous_columns is None:
+            raise ValueError("Need to provide exogenous_columns or/and "
+                             "endogenous_columns.")
 
         # Check that we can find all the phenotype data.
         expected_cols = {phenotypes_sample_id_column}
@@ -133,10 +158,13 @@ class PhenotypeGeneticDataset(GeneticDataset):
     def __getitem__(self, idx):
         """Retrieve data at index.
 
-        The return type is a tuple of length 1 to 4 depending on the requested
-        endogenous and exogenous variables. The order is always:
+        The return type is a batch which may or may not contain the following
+        fields depending on the genotype scaling and user requested variables:
 
-            - (genotypes_raw, genotypes_std, exogenous, endogenous)
+            - dosage
+            - std_genotypes
+            - exogenous
+            - endogenous
 
         """
         # Get the genotypes from the backend.
@@ -153,16 +181,30 @@ class PhenotypeGeneticDataset(GeneticDataset):
 
         out = [geno]
 
-        if geno_std is not None:
+        if geno_std is None:
+            _geno_batch_fac = BatchDosage
+        else:
+            _geno_batch_fac = BatchDosageStandardized
             out.append(geno_std)
 
         if self.exog is not None:
+            has_exog = True
             out.append(self.exog[idx, :])
+        else:
+            has_exog = False
 
         if self.endog is not None:
+            has_endog = True
             out.append(self.endog[idx, :])
+        else:
+            has_endog = False
 
-        return tuple(out)
+        _batch_fac = BatchFactory.union(
+            _geno_batch_fac,
+            _get_phenotype_batch_factory(has_exog, has_endog)
+        )
+
+        return _batch_fac(tuple(out))
 
     def __len__(self):
         return len(self.idx["geno"])

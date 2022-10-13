@@ -4,7 +4,6 @@ Numpy backend for genotypes for datasets that fit in memory.
 
 import os
 import pickle
-import copy
 from typing import Optional, Set, Iterable, List
 
 from tqdm import tqdm
