@@ -9,7 +9,7 @@ def get_block_trainer_config():
         "enc_h_dropout_p": 0.1,
         "dec_h_dropout_p": 0.1,
         "val_proportion": 0.1,
-        "model/activations": "LeakyReLU",
+        "model/activation": "LeakyReLU",
         "model/rep_size": 256,
         "model/enc_layers": [1000, 400],
         "model/dec_layers": [400, 1000],

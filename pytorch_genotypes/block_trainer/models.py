@@ -3,48 +3,51 @@ from torch import nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
 
+from ..models import GenotypeAutoencoder, MLP
 
-class ChildModel(pl.LightningModule):
-    def __init__(self, input_dim, n_hidden, lr=1e-3, drop=0.25, reg=1e-5):
+
+class ChildBlockAutoencoder(GenotypeAutoencoder):
+    def __init__(
+        self,
+        chunk_size,
+        enc_layers,
+        dec_layers,
+        rep_size,
+        lr,
+        batch_size,
+        max_epochs,
+        weight_decay,
+        add_batchnorm,
+        input_dropout_p,
+        enc_h_dropout_p,
+        dec_h_dropout_p,
+        activation
+    ):
         super().__init__()
         self.save_hyperparameters()
-
-        self.encoder = nn.Sequential(
-            nn.Dropout(self.hparams.drop),
-            nn.Linear(input_dim, n_hidden),
-            nn.ReLU()
+        self.encoder = MLP(
+            chunk_size,
+            enc_layers,
+            rep_size,
+            loss=None,
+            use_dosage=True,
+            add_hidden_layer_batchnorm=add_batchnorm,
+            add_input_layer_batchnorm=True,
+            input_dropout_p=input_dropout_p,
+            hidden_dropout_p=enc_h_dropout_p,
+            activations=[getattr(nn, activation)()]
         )
 
-        self.decoder = nn.Sequential(
-            nn.Linear(n_hidden, input_dim),
-            nn.ReLU(),
-            nn.Linear(input_dim, 3 * input_dim),
-            ReshapeLogSoftmax(n_snps=input_dim),
-        )
-
-    def forward(self, features):
-        reconstruction = self.encoder(features)
-        reconstruction = self.decoder(reconstruction)
-        return reconstruction
-
-    def training_step(self, batch, batch_idx):
-        # Training_step defined the train loop.
-        # It is independent of forward
-        x = batch[0]
-        x = x.to(torch.float32)
-
-        z = self.encoder(x)
-        x_hat = self.decoder(z)
-        loss = F.nll_loss(x_hat, torch.round(x).to(int))
-        # Logging to TensorBoard by default
-        self.log(f"Batch: {batch_idx} Train Loss", loss, on_epoch=True)
-        return loss
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(
-            self.parameters(),
-            lr=self.hparams.lr,
-            weight_decay=self.hparams.reg
+        self.decoder = MLP(
+            rep_size,
+            dec_layers,
+            chunk_size,
+            loss=None,
+            add_hidden_layer_batchnorm=add_batchnorm,
+            add_input_layer_batchnorm=False,
+            input_dropout_p=False,  # No dropout at repr. level.
+            hidden_dropout_p=dec_h_dropout_p,
+            activations=[getattr(nn, activation)()]
         )
 
 

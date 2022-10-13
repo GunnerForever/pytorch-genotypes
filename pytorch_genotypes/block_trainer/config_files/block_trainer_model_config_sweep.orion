@@ -12,7 +12,7 @@ def get_block_trainer_config():
     input_dropout_p = input_dropout_p~uniform(0, 0.2)
     enc_h_dropout_p = enc_h_dropout_p~uniform(0, 0.5)
 
-    activations = "model/activations~choices(["LeakyReLU", "ReLU", "GELU"])"
+    activation = "model/activation~choices(["LeakyReLU", "ReLU", "GELU"])"
     rep_size = model/rep_size~uniform(32, 512, discrete=True)
 
     enc_h1 = model/h1~uniform(64, 2000, discrete=True)
@@ -29,7 +29,7 @@ def get_block_trainer_config():
         "enc_h_dropout_p": enc_h_dropout_p,
         "dec_h_dropout_p": None,
         "val_proportion": 0.1,
-        "model/activations": activations,
+        "model/activation": activation,
         "model/rep_size": rep_size,
         "model/enc_layers": [h for h in (enc_h1, enc_h2, enc_h3) if h != 0],
         "model/dec_layers": [],

@@ -13,12 +13,12 @@ from pytorch_genotypes.dataset.core import FixedSizeChunks
 
 import torch
 from torch.utils.data import DataLoader, random_split
-import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
+from .models import ChildBlockAutoencoder
+
 from ..dataset import BACKENDS
-from ..models import GenotypeAutoencoder, MLP
 
 
 try:
@@ -36,35 +36,6 @@ DEFAULT_TEMPLATE = resource_filename(
 DEFAULT_CONFIG = resource_filename(
     __name__, os.path.join("config_files", "block_trainer_model_config.py")
 )
-
-
-def build_encoder(args, config):
-    return MLP(
-        args.chunk_size,
-        config["model/enc_layers"],
-        config["model/rep_size"],
-        None,
-        use_dosage=True,
-        add_hidden_layer_batchnorm=config["add_batchnorm"],
-        add_input_layer_batchnorm=True,
-        input_dropout_p=config["input_dropout_p"],
-        hidden_dropout_p=config["enc_h_dropout_p"],
-        activations=[getattr(nn, config["model/activations"])()]
-    )
-
-
-def build_decoder(args, config):
-    return MLP(
-        config["model/rep_size"],
-        config["model/dec_layers"],
-        args.chunk_size,
-        None,
-        add_hidden_layer_batchnorm=config["add_batchnorm"],
-        add_input_layer_batchnorm=True,
-        input_dropout_p=False,  # No dropout at repr. level.
-        hidden_dropout_p=config["dec_h_dropout_p"],
-        activations=[getattr(nn, config["model/activations"])()]
-    )
 
 
 def parse_config(filename):
@@ -118,11 +89,20 @@ def train(args):
         num_workers=1
     )
 
-    model = GenotypeAutoencoder(
-        encoder=build_encoder(args, config),
-        decoder=build_decoder(args, config),
+    model = ChildBlockAutoencoder(
+        chunk_size=args.chunk_size,
+        enc_layers=config["model/enc_layers"],
+        dec_layers=config["model/dec_layers"],
+        rep_size=config["model/rep_size"],
         lr=config["lr"],
-        weight_decay=config["weight_decay"]
+        batch_size=config["batch_size"],
+        max_epochs=config["max_epochs"],
+        weight_decay=config["weight_decay"],
+        add_batchnorm=config["add_batchnorm"],
+        input_dropout_p=config["input_dropout_p"],
+        enc_h_dropout_p=config["enc_h_dropout_p"],
+        dec_h_dropout_p=config["dec_h_dropout_p"],
+        activation=config["model/activation"]
     )
 
     logger = None

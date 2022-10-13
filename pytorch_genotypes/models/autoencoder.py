@@ -11,6 +11,7 @@ All models are expected to be trained with (Optional):
 """
 
 
+from typing import Optional
 import torch
 from torch.special import expit
 import pytorch_lightning as pl
@@ -34,8 +35,8 @@ class GenotypeAutoencoder(pl.LightningModule):
     """
     def __init__(
         self,
-        encoder: pl.LightningModule,
-        decoder: pl.LightningModule,
+        encoder: Optional[pl.LightningModule] = None,
+        decoder: Optional[pl.LightningModule] = None,
         lr=1e-3,
         weight_decay=1e-3,
     ):
