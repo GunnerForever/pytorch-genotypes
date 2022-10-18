@@ -55,13 +55,15 @@ class MLP(pl.LightningModule):
         if hidden_dropout_p is not None:
             activations.append(nn.Dropout(hidden_dropout_p))
 
-        self.model = nn.Sequential(*build_mlp(
+        modules.extend(build_mlp(
             input_size,
             hidden=tuple(hidden_layers),
             out=output_size,
             activations=activations,
             add_batchnorm=add_hidden_layer_batchnorm,
         ))
+
+        self.model = nn.Sequential(*modules)
 
     def forward(self, x):
         return self.model(x)
