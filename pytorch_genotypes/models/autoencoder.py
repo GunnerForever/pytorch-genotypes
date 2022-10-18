@@ -46,7 +46,6 @@ class GenotypeAutoencoder(pl.LightningModule):
         self.decoder = decoder
 
     def _step(self, geno_dosage, batch_idx, log, log_prefix=""):
-        hard_calls = dosage_to_hard_call(geno_dosage)
         geno_logits = self.forward(geno_dosage)
 
         geno_p = expit(geno_logits)
@@ -58,10 +57,11 @@ class GenotypeAutoencoder(pl.LightningModule):
         ).mean()
 
         if log:
+            hard_calls = dosage_to_hard_call(geno_dosage)
             reconstruction_acc = (
                 dosage_to_hard_call(reconstruction_dosage) ==
                 hard_calls
-            ).to(float).mean(dim=1).mean()
+            ).to(torch.float32).mean(dim=1).mean()
 
             self.log(f"{log_prefix}reconstruction_acc", reconstruction_acc)
             self.log(f"{log_prefix}reconstruction_nll", reconstruction_nll)
@@ -82,7 +82,7 @@ class GenotypeAutoencoder(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         dosage = self._get_dosage_from_batch(batch)
-        return self._step(dosage, batch_idx, log=True)
+        return self._step(dosage, batch_idx, log=True, log_prefix="train_")
 
     def validation_step(self, batch, batch_idx):
         dosage = self._get_dosage_from_batch(batch)

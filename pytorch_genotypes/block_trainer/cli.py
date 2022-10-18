@@ -11,8 +11,8 @@ from pkg_resources import resource_filename
 
 from pytorch_genotypes.dataset.core import FixedSizeChunks
 
-import torch
-from torch.utils.data import DataLoader, random_split
+import numpy as np
+from torch.utils.data import DataLoader, Subset
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
@@ -38,6 +38,9 @@ DEFAULT_CONFIG = resource_filename(
 )
 
 
+VAL_INDICES_FILENAME = "block-trainer-val-indices.npz"
+
+
 def parse_config(filename):
     conf_global = {}
     with open(filename) as f:
@@ -55,27 +58,19 @@ def train(args):
     print("Current model configuration:")
     pprint.pprint(config)
 
-    test_proportion = 0.1
-
     print("-----------------------------------")
     print("Block Training Process Begin.")
     print("-----------------------------------")
     backend = BACKENDS[args.backend].load(args.backend_pickle_filename)
     chunks = FixedSizeChunks(backend, max_variants_per_chunk=args.chunk_size)
 
-    genotypes_dataset = chunks.get_dataset_for_chunk_id(args.chunk_index)
+    # Recover the validation indices.
+    val_indices = np.load(VAL_INDICES_FILENAME)["arr_0"]
+    train_indices = np.setdiff1d(np.arange(len(backend)), val_indices)
 
-    n = backend.get_n_samples()
-
-    # Sample some test indices.
-    n_test = int(round(test_proportion * n))
-    n_train = n - n_test
-
-    train_dataset, test_dataset = random_split(
-        genotypes_dataset,
-        [n_train, n_test],
-        generator=torch.Generator().manual_seed(42)
-    )
+    full_dataset = chunks.get_dataset_for_chunk_id(args.chunk_index)
+    train_dataset = Subset(full_dataset, train_indices)
+    val_dataset = Subset(full_dataset, val_indices)
 
     train_loader = DataLoader(
         train_dataset,
@@ -83,9 +78,9 @@ def train(args):
         num_workers=2
     )
 
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=n_test,
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=len(val_dataset),
         num_workers=1
     )
 
@@ -114,7 +109,7 @@ def train(args):
         logger = wandb_logger
 
     stop_if_nan = EarlyStopping(
-        monitor="reconstruction_nll",
+        monitor="train_reconstruction_nll",
         check_finite=True
     )
 
@@ -126,11 +121,12 @@ def train(args):
         logger=logger,
         callbacks=[stop_if_nan]
     )
-    trainer.fit(model, train_loader)
-    test_results = trainer.test(model, test_loader)[0]
+    trainer.fit(model, train_loader, val_loader)
 
     if ORION_SWEEP:
-        report_objective(test_results["test_reconstruction_nll"])
+        pass
+        # FIXME
+        # report_objective(test_results["test_reconstruction_nll"])
 
     print("-----------------------------------")
     print("Training process has finished. Saving trained model.")
@@ -157,6 +153,14 @@ def main():
 
     if args.mode == "train":
         return train(args)
+
+    # Create the validation dataset.
+    n_val = int(round(len(backend) * args.val_proportion))
+    val_indices = np.random.choice(len(backend), size=n_val, replace=False)
+    if os.path.isfile(VAL_INDICES_FILENAME):
+        raise IOError(f"File {VAL_INDICES_FILENAME} already exists.")
+
+    np.savez_compressed(VAL_INDICES_FILENAME, val_indices)
 
     if args.template is None:
         template = DEFAULT_TEMPLATE
@@ -229,6 +233,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Number of contiguous variants that are jointly modeled in the "
         "blocks of the first level.",
+    )
+
+    # Validation datset proportion.
+    parser.add_argument(
+        "--val-proportion",
+        default=0.1,
+        type=float,
     )
 
     # Script template.

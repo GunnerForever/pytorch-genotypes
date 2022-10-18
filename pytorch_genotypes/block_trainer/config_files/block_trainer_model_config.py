@@ -1,8 +1,8 @@
 def get_block_trainer_config():
     return {
-        "lr": 1e-3,
+        "lr": 5e-4,
         "batch_size": 256,
-        "max_epochs": 10,
+        "max_epochs": 200,
         "weight_decay": 1e-5,
         "add_batchnorm": True,
         "input_dropout_p": None,
@@ -11,6 +11,6 @@ def get_block_trainer_config():
         "val_proportion": 0.1,
         "model/activation": "LeakyReLU",
         "model/rep_size": 256,
-        "model/enc_layers": [1000, 400],
-        "model/dec_layers": [400, 1000],
+        "model/enc_layers": [700, 400],
+        "model/dec_layers": [400, 700],
     }
