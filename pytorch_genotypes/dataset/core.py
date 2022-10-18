@@ -159,7 +159,7 @@ class GeneticDataset(Dataset):
         else:
             self.scaler = None
 
-    def create_scaler(self) -> TensorScaler:
+    def create_scaler(self, max_n: int = 2000) -> TensorScaler:
         """Column-wise (genotype) scaler.
 
         This method is defined at the datset level because it is important
@@ -169,25 +169,22 @@ class GeneticDataset(Dataset):
         # Estimate scaling on max 2k rows.
         n = len(self)
 
-        if n > 2000:
+        if n > max_n:
             indices = np.sort(np.random.choice(
-                np.arange(n), size=2000, replace=False
+                np.arange(n), size=max_n, replace=False
             ))
-            n = 2000
+            n = max_n
         else:
             indices = np.arange(n)
 
-        print("Init mat")
         mat = torch.empty(
             (n, self.backend.get_n_variants()),
             dtype=torch.float32
         )
 
-        print("Filling")
         for mat_index, index in enumerate(indices):
             mat[mat_index, :] = self.backend[index]
 
-        print("Init scaler")
         return TensorScaler(mat)
 
     def load_full_dataset(self) -> Tuple[torch.Tensor, ...]:
