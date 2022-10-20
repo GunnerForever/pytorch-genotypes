@@ -39,14 +39,30 @@ class GenotypeAutoencoder(pl.LightningModule):
         decoder: Optional[pl.LightningModule] = None,
         lr=1e-3,
         weight_decay=1e-3,
+        use_standardized_genotype: bool = False
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["encoder", "decoder"])
+        self.use_standardized_genotype = use_standardized_genotype
         self.encoder = encoder
         self.decoder = decoder
 
-    def _step(self, geno_dosage, batch_idx, log, log_prefix=""):
-        geno_logits = self.forward(geno_dosage)
+    def _step(self, batch, batch_idx, log, log_prefix=""):
+        if len(batch) == 2:
+            geno_dosage, geno_std = batch
+        else:
+            geno_dosage = batch[0]
+            geno_std = None
+
+        geno_dosage = geno_dosage.to(torch.float32)
+
+        if self.use_standardized_genotype:
+            if geno_std is None:
+                raise RuntimeError(f"No standardized genotypes provided in "
+                                   f"the dataset. Batch: {batch}")
+            geno_logits = self.forward(geno_std)
+        else:
+            geno_logits = self.forward(geno_dosage)
 
         geno_p = expit(geno_logits)
         reconstruction_dosage = 2 * geno_p
@@ -81,23 +97,29 @@ class GenotypeAutoencoder(pl.LightningModule):
         return self.decode(self.encode(x))
 
     def training_step(self, batch, batch_idx):
-        dosage = self._get_dosage_from_batch(batch)
-        return self._step(dosage, batch_idx, log=True, log_prefix="train_")
+        return self._step(batch, batch_idx, log=True, log_prefix="train_")
 
     def validation_step(self, batch, batch_idx):
-        dosage = self._get_dosage_from_batch(batch)
-        return self._step(dosage, batch_idx, log=True, log_prefix="val_")
+        return self._step(batch, batch_idx, log=True, log_prefix="val_")
 
     def test_step(self, batch, batch_idx):
-        dosage = self._get_dosage_from_batch(batch)
-        return self._step(dosage, batch_idx, log=True, log_prefix="test_")
+        return self._step(batch, batch_idx, log=True, log_prefix="test_")
 
-    @staticmethod
-    def _get_dosage_from_batch(batch):
+    def _get_x_from_batch(self, batch):
         if len(batch) == 2:
-            geno_dosage, _ = batch
+            geno_dosage, geno_std = batch
         else:
             geno_dosage = batch[0]
+            geno_std = None
+
+        if self.use_standardized_genotype:
+            if geno_std is None:
+                raise ValueError(
+                    "Can't train GenotypeAutoencoder on standardized genotypes"
+                    "unless supported by the dataset."
+                )
+
+            return geno_std.to(torch.float32)
 
         return geno_dosage.to(torch.float32)
 

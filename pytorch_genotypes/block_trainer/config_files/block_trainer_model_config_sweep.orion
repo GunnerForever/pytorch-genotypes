@@ -19,6 +19,7 @@ def get_block_trainer_config():
     enc_h2 = model/h2~uniform(64, 1000, discrete=True)
     enc_h3 = model/h3~uniform(64, 1000, discrete=True)
 
+
     return {
         "lr": lr,
         "max_epochs": max_epochs,
@@ -29,6 +30,7 @@ def get_block_trainer_config():
         "enc_h_dropout_p": enc_h_dropout_p,
         "dec_h_dropout_p": None,
         "val_proportion": 0.1,
+        "use_standardized_genotype": True,
         "model/activation": activation,
         "model/rep_size": rep_size,
         "model/enc_layers": [h for h in (enc_h1, enc_h2, enc_h3) if h != 0],

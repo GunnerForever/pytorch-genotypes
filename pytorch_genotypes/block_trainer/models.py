@@ -21,18 +21,18 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
         input_dropout_p,
         enc_h_dropout_p,
         dec_h_dropout_p,
-        activation
+        activation,
+        use_standardized_genotype
     ):
-        super().__init__()
+        super().__init__(use_standardized_genotype=use_standardized_genotype)
         self.save_hyperparameters()
         self.encoder = MLP(
             chunk_size,
             enc_layers,
             rep_size,
             loss=None,
-            use_dosage=True,
             add_hidden_layer_batchnorm=add_batchnorm,
-            add_input_layer_batchnorm=True,
+            add_input_layer_batchnorm=not use_standardized_genotype,
             input_dropout_p=input_dropout_p,
             hidden_dropout_p=enc_h_dropout_p,
             activations=[getattr(nn, activation)()]
@@ -45,7 +45,7 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
             loss=None,
             add_hidden_layer_batchnorm=add_batchnorm,
             add_input_layer_batchnorm=False,
-            input_dropout_p=False,  # No dropout at repr. level.
+            input_dropout_p=None,  # No dropout at repr. level.
             hidden_dropout_p=dec_h_dropout_p,
             activations=[getattr(nn, activation)()]
         )

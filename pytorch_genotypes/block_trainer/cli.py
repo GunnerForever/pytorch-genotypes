@@ -14,7 +14,7 @@ from pytorch_genotypes.dataset.core import FixedSizeChunks
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 from .models import ChildBlockAutoencoder
 
@@ -39,6 +39,22 @@ DEFAULT_CONFIG = resource_filename(
 
 
 VAL_INDICES_FILENAME = "block-trainer-val-indices.npz"
+
+
+class StopIfNan(EarlyStopping):
+    def __init__(self):
+        super().__init__(
+            monitor="train_reconstruction_nll",
+            check_finite=True,
+        )
+
+    def _run_early_stopping_check(self, trainer):
+        logs = trainer.callback_metrics
+        current = logs[self.monitor].squeeze()
+        should_stop, reason = self._evaluate_stopping_criteria(current)
+        if should_stop:
+            print("\nStopping training because training NLL is NaN.")
+            super()._run_early_stopping_check(trainer)
 
 
 def parse_config(filename):
@@ -72,9 +88,13 @@ def train(args):
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset = Subset(full_dataset, val_indices)
 
+    print("n train:", len(train_dataset))
+    print("n val:", len(val_dataset))
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config["batch_size"],
+        shuffle=True,
         num_workers=2
     )
 
@@ -97,8 +117,10 @@ def train(args):
         input_dropout_p=config["input_dropout_p"],
         enc_h_dropout_p=config["enc_h_dropout_p"],
         dec_h_dropout_p=config["dec_h_dropout_p"],
-        activation=config["model/activation"]
+        activation=config["model/activation"],
+        use_standardized_genotype=config["use_standardized_genotype"]
     )
+    print(model)
 
     logger = None
     if args.wandb_logger:
@@ -108,9 +130,18 @@ def train(args):
         )
         logger = wandb_logger
 
-    stop_if_nan = EarlyStopping(
-        monitor="train_reconstruction_nll",
-        check_finite=True
+    results_base = "chunk_checkpoints"
+    if not os.path.isdir(results_base):
+        os.makedirs(results_base)
+
+    checkpoint_filename = f"model-block-{args.chunk_index}"
+
+    model_checkpoint = ModelCheckpoint(
+        save_top_k=1,
+        monitor="val_reconstruction_nll",
+        mode="min",
+        dirpath=results_base,
+        filename=checkpoint_filename
     )
 
     trainer = pl.Trainer(
@@ -119,7 +150,15 @@ def train(args):
         devices=-1,  # use all GPUs
         max_epochs=config["max_epochs"],
         logger=logger,
-        callbacks=[stop_if_nan]
+        callbacks=[
+            StopIfNan(),
+            model_checkpoint,
+            EarlyStopping(
+                monitor="val_reconstruction_nll",
+                mode="min",
+                patience=20
+            )
+        ]
     )
     trainer.fit(model, train_loader, val_loader)
 
@@ -127,23 +166,6 @@ def train(args):
         pass
         # FIXME
         # report_objective(test_results["test_reconstruction_nll"])
-
-    print("-----------------------------------")
-    print("Training process has finished. Saving trained model.")
-    print("-----------------------------------")
-
-    # Save model
-    results_base = "chunk_checkpoints"
-    if not os.path.isdir(results_base):
-        os.makedirs(results_base)
-
-    checkpoint_filename = os.path.join(
-        results_base, f"model-block-{args.chunk_index}.ckpt"
-    )
-    trainer.save_checkpoint(checkpoint_filename)
-    print("-----------------------------------")
-    print("Model Saved.")
-    print("-----------------------------------")
 
 
 def main():

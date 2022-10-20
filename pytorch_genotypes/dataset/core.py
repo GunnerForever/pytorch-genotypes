@@ -9,6 +9,7 @@ can implement additional logic, for example to include phenotype data.
 import logging
 import pickle
 import itertools
+import collections
 from collections import defaultdict, OrderedDict
 from typing import (
     List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional, Union, Any
@@ -33,12 +34,12 @@ T = TypeVar("T", bound="GeneticDatasetBackend")
 
 
 # Return a callable that takes *args -> named tuple like.
-class Batch(object):
-    __slots__ = ("name", "fields", "payload", "_key_to_index")
+class Batch(collections.abc.Sequence):
+    __slots__ = ("name", "_fields", "payload", "_key_to_index")
 
     def __init__(self, name, fields, *payload):
         self.name = name
-        self.fields = fields
+        self._fields = fields
         self.payload: List[Any] = payload
 
         self._key_to_index = {k: i for i, k in enumerate(fields)}
@@ -46,7 +47,7 @@ class Batch(object):
     def __repr__(self) -> str:
         s = f"<{self.name} - "
         parts = []
-        for field, value in zip(self.fields, self.payload):
+        for field, value in zip(self._fields, self.payload):
             if isinstance(value, torch.Tensor):
                 shape = "x".join([str(i) for i in value.shape])
                 value = f"Tensor<{shape}>"
@@ -55,14 +56,18 @@ class Batch(object):
 
         return s + ", ".join(parts) + ">"
 
+    def __iter__(self):
+        for value in self.payload:
+            yield value
+
     def __getattr__(self, __name: str) -> Any:
         return self.payload[self._key_to_index[__name]]
 
-    def __getitem__(self, k: int) -> Any:
+    def __getitem__(self, k: int) -> Any:  # type: ignore
         return self.payload[k]
 
     def __len__(self) -> int:
-        return len(self.fields)
+        return len(self._fields)
 
 
 class BatchFactory(object):

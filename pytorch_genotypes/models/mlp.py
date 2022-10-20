@@ -5,11 +5,16 @@ This is provided mainly to help build more complex models.
 
 """
 
-from typing import List, Optional, Iterable, Literal, Callable, Dict
+from typing import List, Optional, Iterable, Callable, Dict
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from .utils import build_mlp
 
@@ -49,10 +54,10 @@ class MLP(pl.LightningModule):
         if add_input_layer_batchnorm:
             modules.append(nn.BatchNorm1d(input_size))
 
-        if input_dropout_p is not None:
+        if input_dropout_p is not None and input_dropout_p > 0:
             modules.append(nn.Dropout(input_dropout_p))
 
-        if hidden_dropout_p is not None:
+        if hidden_dropout_p is not None and hidden_dropout_p > 0:
             activations.append(nn.Dropout(hidden_dropout_p))
 
         modules.extend(build_mlp(
@@ -83,7 +88,7 @@ class MLP(pl.LightningModule):
                 "No endogenous (Y) value for supervised learning."
             )
 
-        if self.use_dosage:
+        if self.hparams.use_dosage:
             x = batch.dosage
         else:
             x = batch.std_genotypes
