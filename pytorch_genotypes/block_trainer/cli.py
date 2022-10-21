@@ -12,6 +12,7 @@ from pkg_resources import resource_filename
 from pytorch_genotypes.dataset.core import FixedSizeChunks
 
 import numpy as np
+import torch
 from torch.utils.data import DataLoader, Subset
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
@@ -140,7 +141,8 @@ def train(args):
         enc_h_dropout_p=config["enc_h_dropout_p"],
         dec_h_dropout_p=config["dec_h_dropout_p"],
         activation=config["model/activation"],
-        use_standardized_genotype=config["use_standardized_genotype"]
+        use_standardized_genotype=config["use_standardized_genotype"],
+        softmax_weights=torch.Tensor([1, 3, 1])
     )
     print(model)
 
@@ -169,11 +171,11 @@ def train(args):
     callbacks = [
         # StopIfNan(),
         model_checkpoint,
-        EarlyStopping(
-            monitor=f"val_{OBJECTIVE}",
-            mode="min",
-            patience=20
-        ),
+        # EarlyStopping(
+        #     monitor=f"val_{OBJECTIVE}",
+        #     mode="min",
+        #     patience=20
+        # ),
     ]
 
     if ORION_SWEEP:

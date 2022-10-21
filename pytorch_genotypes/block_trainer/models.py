@@ -22,9 +22,13 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
         enc_h_dropout_p,
         dec_h_dropout_p,
         activation,
-        use_standardized_genotype
+        use_standardized_genotype,
+        softmax_weights
     ):
-        super().__init__(use_standardized_genotype=use_standardized_genotype)
+        super().__init__(
+            use_standardized_genotype=use_standardized_genotype,
+            softmax_weights=softmax_weights
+        )
         self.save_hyperparameters()
         self.encoder = MLP(
             chunk_size,

@@ -27,11 +27,10 @@ class GenotypeAutoencoder(pl.LightningModule):
     The output of the decoder is a vector of probabilities (actually logits)
     for every sample to be interpreted as a minor allele probability.
 
-    This model is trained by negative log likelihood and will convert the input
-    from dosages to genotype calls if needed.
+    For the softmax_weights, if you provide a n_snp x 3 tensor, the penalties
+    can be specified by variant and by genotype. If a 3 dimensional tensor is
+    provided it will be used as weights for genotypes across all variants.
 
-    When generating reconstructions, we take 2 * individual mutation
-    probability.
 
     """
     def __init__(
@@ -40,15 +39,22 @@ class GenotypeAutoencoder(pl.LightningModule):
         decoder: Optional[pl.LightningModule] = None,
         lr=1e-3,
         weight_decay=1e-3,
-        use_standardized_genotype: bool = False
+        use_standardized_genotype: bool = False,
+        softmax_weights: Optional[torch.Tensor] = None
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["encoder", "decoder"])
         self.use_standardized_genotype = use_standardized_genotype
         self.encoder = encoder
         self.decoder = decoder
+        self.softmax_weights = softmax_weights
 
     def _step(self, batch, batch_idx, log, log_prefix=""):
+        # Move softmax weights if necessary.
+        if self.softmax_weights is not None:
+            if self.softmax_weights.device != self.device:
+                self.softmax_weights = self.softmax_weights.to(self.device)
+
         if len(batch) == 2:
             geno_dosage, geno_std = batch
         else:
@@ -88,6 +94,9 @@ class GenotypeAutoencoder(pl.LightningModule):
             smax_1 / smax_c,
             smax_2 / smax_c
         ), dim=2)))
+
+        if self.softmax_weights is not None:
+            preds_three_classes *= self.softmax_weights
 
         # Index to get the target likelihood.
         hard_calls = dosage_to_hard_call(geno_dosage)
