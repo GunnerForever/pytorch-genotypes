@@ -42,6 +42,8 @@ DEFAULT_CONFIG = resource_filename(
 
 VAL_INDICES_FILENAME = "block-trainer-val-indices.npz"
 
+OBJECTIVE = "mean_like"
+
 
 class OrionCallback(Callback):
     def __init__(self, monitor_metric: str):
@@ -64,7 +66,7 @@ class OrionCallback(Callback):
 class StopIfNan(EarlyStopping):
     def __init__(self):
         super().__init__(
-            monitor="train_reconstruction_mse",
+            monitor=f"train_{OBJECTIVE}",
             check_finite=True,
         )
 
@@ -158,24 +160,24 @@ def train(args):
 
     model_checkpoint = ModelCheckpoint(
         save_top_k=1,
-        monitor="val_reconstruction_mse",
+        monitor=f"val_{OBJECTIVE}",
         mode="min",
         dirpath=results_base,
         filename=checkpoint_filename
     )
 
     callbacks = [
-        StopIfNan(),
+        # StopIfNan(),
         model_checkpoint,
         EarlyStopping(
-            monitor="val_reconstruction_mse",
+            monitor=f"val_{OBJECTIVE}",
             mode="min",
             patience=20
         ),
     ]
 
     if ORION_SWEEP:
-        callbacks.append(OrionCallback("val_reconstruction_mse"))
+        callbacks.append(OrionCallback(f"val_{OBJECTIVE}"))
 
     trainer = pl.Trainer(
         log_every_n_steps=1,

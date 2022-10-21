@@ -22,7 +22,7 @@ def dosage_to_hard_call(
 
     """
 
-    out = torch.ones_like(matrix, dtype=torch.int)
+    out = torch.ones_like(matrix, dtype=torch.int64)
 
     out[matrix <= 2/3] = 0
     out[matrix >= 4/3] = 2

@@ -70,8 +70,38 @@ class GenotypeAutoencoder(pl.LightningModule):
 
         reconstruction_mse = F.mse_loss(reconstruction_dosage, geno_dosage)
 
+        p_geno2 = geno_p ** 2
+        p_geno1 = 2 * geno_p * (1 - geno_p) + 0.5
+        p_geno0 = (1 - geno_p) ** 2
+
+        smax_0 = torch.exp(p_geno0)
+        smax_1 = torch.exp(p_geno1)
+        smax_2 = torch.exp(p_geno2)
+
+        smax_c = smax_0 + smax_1 + smax_2
+
+        def clamp(x):
+            return torch.clamp(x, min=-10)
+
+        preds_three_classes = -clamp(torch.log(torch.stack((
+            smax_0 / smax_c,
+            smax_1 / smax_c,
+            smax_2 / smax_c
+        ), dim=2)))
+
+        # Index to get the target likelihood.
+        hard_calls = dosage_to_hard_call(geno_dosage)
+        likelihoods = torch.gather(
+            preds_three_classes,
+            dim=2,
+            index=hard_calls.unsqueeze(-1)
+        )
+
+        mean_like = likelihoods.mean()
+        if torch.isnan(mean_like):
+            print("==> LOSS IS NAN!! <==")
+
         if log:
-            hard_calls = dosage_to_hard_call(geno_dosage)
             reconstruction_hard_calls = dosage_to_hard_call(
                 reconstruction_dosage
             )
@@ -81,9 +111,6 @@ class GenotypeAutoencoder(pl.LightningModule):
             ).to(torch.float32)
 
             reconstruction_acc = accurate_reconstruction.mean()
-
-            def clamp(x):
-                return torch.clamp(x, min=-10)
 
             reconstruction_nll = (
                 -geno_dosage * clamp(torch.log(geno_p))
@@ -102,11 +129,13 @@ class GenotypeAutoencoder(pl.LightningModule):
             self.log(f"{log_prefix}homo_maj_acc",
                      accurate_reconstruction[homo_maj].mean())
 
+            self.log(f"{log_prefix}mean_like", mean_like)
+
             self.log(f"{log_prefix}reconstruction_acc", reconstruction_acc)
             self.log(f"{log_prefix}reconstruction_nll", reconstruction_nll)
             self.log(f"{log_prefix}reconstruction_mse", reconstruction_mse)
 
-        return reconstruction_mse
+        return mean_like
 
     def encode(self, geno_std):
         """Return the latent code for a given sample."""
