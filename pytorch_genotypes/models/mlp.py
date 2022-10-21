@@ -14,7 +14,7 @@ import torch.nn.functional as F
 try:
     from typing import Literal
 except ImportError:
-    from typing_extensions import Literal
+    from typing_extensions import Literal  # type: ignore
 
 from .utils import build_mlp
 

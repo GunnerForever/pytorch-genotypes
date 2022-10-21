@@ -10,8 +10,8 @@ def get_block_trainer_config():
         "dec_h_dropout_p": 0,
         "val_proportion": 0.1,
         "use_standardized_genotype": False,
-        "model/activation": "LeakyReLU",
-        "model/rep_size": 32,
-        "model/enc_layers": [2000, 500],
-        "model/dec_layers": [500, 200],
+        "model/activation": "GELU",
+        "model/rep_size": 64,
+        "model/enc_layers": [1000, 500],
+        "model/dec_layers": [500, 1000],
     }

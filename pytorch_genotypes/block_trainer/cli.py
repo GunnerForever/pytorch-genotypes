@@ -14,7 +14,9 @@ from pytorch_genotypes.dataset.core import FixedSizeChunks
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.callbacks import (
+    ModelCheckpoint, EarlyStopping, Callback
+)
 
 from .models import ChildBlockAutoencoder
 
@@ -41,10 +43,28 @@ DEFAULT_CONFIG = resource_filename(
 VAL_INDICES_FILENAME = "block-trainer-val-indices.npz"
 
 
+class OrionCallback(Callback):
+    def __init__(self, monitor_metric: str):
+        self.metric = monitor_metric
+        self.best_metric = float("inf")
+
+    def on_validation_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule
+    ) -> None:
+        cur_metric = trainer.callback_metrics[self.metric].cpu().numpy().item()
+        if cur_metric < self.best_metric:
+            self.best_metric = cur_metric
+
+    def on_fit_end(self, trainer, pl_module):
+        report_objective(self.best_metric)
+
+
 class StopIfNan(EarlyStopping):
     def __init__(self):
         super().__init__(
-            monitor="train_reconstruction_nll",
+            monitor="train_reconstruction_mse",
             check_finite=True,
         )
 
@@ -53,7 +73,7 @@ class StopIfNan(EarlyStopping):
         current = logs[self.monitor].squeeze()
         should_stop, reason = self._evaluate_stopping_criteria(current)
         if should_stop:
-            print("\nStopping training because training NLL is NaN.")
+            print("\nStopping training because training metric is NaN.")
             super()._run_early_stopping_check(trainer)
 
 
@@ -138,11 +158,24 @@ def train(args):
 
     model_checkpoint = ModelCheckpoint(
         save_top_k=1,
-        monitor="val_reconstruction_nll",
+        monitor="val_reconstruction_mse",
         mode="min",
         dirpath=results_base,
         filename=checkpoint_filename
     )
+
+    callbacks = [
+        StopIfNan(),
+        model_checkpoint,
+        EarlyStopping(
+            monitor="val_reconstruction_mse",
+            mode="min",
+            patience=20
+        ),
+    ]
+
+    if ORION_SWEEP:
+        callbacks.append(OrionCallback("val_reconstruction_mse"))
 
     trainer = pl.Trainer(
         log_every_n_steps=1,
@@ -150,22 +183,9 @@ def train(args):
         devices=-1,  # use all GPUs
         max_epochs=config["max_epochs"],
         logger=logger,
-        callbacks=[
-            StopIfNan(),
-            model_checkpoint,
-            EarlyStopping(
-                monitor="val_reconstruction_nll",
-                mode="min",
-                patience=20
-            )
-        ]
+        callbacks=callbacks
     )
     trainer.fit(model, train_loader, val_loader)
-
-    if ORION_SWEEP:
-        pass
-        # FIXME
-        # report_objective(test_results["test_reconstruction_nll"])
 
 
 def main():

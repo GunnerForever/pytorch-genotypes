@@ -87,6 +87,14 @@ class BatchFactory(object):
         return BatchFactory(name, fields)
 
 
+def batch_collate_by_standardized(batches: List[Batch]):
+    if not hasattr(batches[0], "std_genotype"):
+        raise ValueError("Current batch does not provide standardized "
+                         "genotypes.")
+
+    return torch.vstack([b.std_genotype for b in batches])
+
+
 BatchDosage = BatchFactory("BatchDosage", ("dosage", ))
 
 
@@ -347,7 +355,14 @@ class FixedSizeChunks(object):
             chunk.first_variant_index, chunk.last_variant_index
         )
 
-    def get_dataset_for_chunk_id(self, chunk_id: int) -> Dataset:
+    def get_dataset_for_chunk_id(
+        self,
+        chunk_id: int,
+        genotype_standardization: bool = False
+    ) -> TensorDataset:
         chunk = self.get_tensor_for_chunk_id(chunk_id)
-        scaler = TensorScaler(chunk)
-        return TensorDataset(chunk, scaler.standardize_tensor(chunk))
+        if genotype_standardization:
+            scaler = TensorScaler(chunk)
+            return TensorDataset(chunk, scaler.standardize_tensor(chunk))
+
+        return TensorDataset(chunk)

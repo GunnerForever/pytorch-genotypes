@@ -13,6 +13,7 @@ All models are expected to be trained with (Optional):
 
 from typing import Optional
 import torch
+import torch.nn.functional as F
 from torch.special import expit
 import pytorch_lightning as pl
 
@@ -67,22 +68,45 @@ class GenotypeAutoencoder(pl.LightningModule):
         geno_p = expit(geno_logits)
         reconstruction_dosage = 2 * geno_p
 
-        reconstruction_nll = (
-            -geno_dosage * torch.clamp(torch.log(geno_p), min=-100)
-            - (2 - geno_dosage) * torch.clamp(torch.log(1 - geno_p), min=-100)
-        ).mean()
+        reconstruction_mse = F.mse_loss(reconstruction_dosage, geno_dosage)
 
         if log:
             hard_calls = dosage_to_hard_call(geno_dosage)
-            reconstruction_acc = (
-                dosage_to_hard_call(reconstruction_dosage) ==
-                hard_calls
-            ).to(torch.float32).mean(dim=1).mean()
+            reconstruction_hard_calls = dosage_to_hard_call(
+                reconstruction_dosage
+            )
+
+            accurate_reconstruction = (
+                reconstruction_hard_calls == hard_calls
+            ).to(torch.float32)
+
+            reconstruction_acc = accurate_reconstruction.mean()
+
+            def clamp(x):
+                return torch.clamp(x, min=-10)
+
+            reconstruction_nll = (
+                -geno_dosage * clamp(torch.log(geno_p))
+                - (2 - geno_dosage) * clamp(torch.log(1 - geno_p))
+            ).mean()
+
+            # This may be computationally intensive but can be useful to debug.
+            homo_min = hard_calls == 0
+            het = hard_calls == 1
+            homo_maj = hard_calls == 2
+
+            self.log(f"{log_prefix}homo_min_acc",
+                     accurate_reconstruction[homo_min].mean())
+            self.log(f"{log_prefix}het_acc",
+                     accurate_reconstruction[het].mean())
+            self.log(f"{log_prefix}homo_maj_acc",
+                     accurate_reconstruction[homo_maj].mean())
 
             self.log(f"{log_prefix}reconstruction_acc", reconstruction_acc)
             self.log(f"{log_prefix}reconstruction_nll", reconstruction_nll)
+            self.log(f"{log_prefix}reconstruction_mse", reconstruction_mse)
 
-        return reconstruction_nll
+        return reconstruction_mse
 
     def encode(self, geno_std):
         """Return the latent code for a given sample."""
