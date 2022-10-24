@@ -8,10 +8,6 @@ import argparse
 import pprint
 from typing import Dict
 from pkg_resources import resource_filename
-from pytorch_genotypes.block_trainer.utils import (
-    geno_freqs_from_maf,
-    variant_entropy_from_geno_freqs
-)
 
 from pytorch_genotypes.dataset.core import FixedSizeChunks
 
@@ -24,6 +20,7 @@ from pytorch_lightning.callbacks import (
 )
 
 from .models import ChildBlockAutoencoder
+from .utils import geno_freqs_from_maf
 
 from ..dataset import BACKENDS
 
@@ -47,7 +44,7 @@ DEFAULT_CONFIG = resource_filename(
 
 VAL_INDICES_FILENAME = "block-trainer-val-indices.npz"
 
-OBJECTIVE = "mean_like"
+OBJECTIVE = "loss"
 
 
 class OrionCallback(Callback):
@@ -120,15 +117,14 @@ def train(args):
         dim=0
     ) / 2
     geno_freqs = geno_freqs_from_maf(mafs)
-    variant_entropies = variant_entropy_from_geno_freqs(geno_freqs)
+    # variant_entropies = variant_entropy_from_geno_freqs(geno_freqs)
 
-    max_ent = torch.max(variant_entropies)
-
-    clipped_inv_freqs = torch.clip(1 / geno_freqs, max=10)
+    # max_ent = torch.max(variant_entropies)
+    clipped_inv_freqs = torch.clip(1 / geno_freqs, max=100)
 
     # penalty_weights = clipped_inv_freqs * variant_entropies[:, None]
-    # penalty_weights = clipped_inv_freqs
-    penalty_weights = variant_entropies[:, None]
+    softmax_weights = clipped_inv_freqs
+    # penalty_weights = variant_entropies[:, None]
 
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset = Subset(full_dataset, val_indices)
@@ -164,7 +160,7 @@ def train(args):
         dec_h_dropout_p=config["dec_h_dropout_p"],
         activation=config["model/activation"],
         use_standardized_genotype=config["use_standardized_genotype"],
-        softmax_weights=penalty_weights
+        softmax_weights=softmax_weights
     )
     print(model)
 

@@ -45,7 +45,7 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
         self.decoder = MLP(
             rep_size,
             dec_layers,
-            chunk_size,
+            chunk_size * 3,
             loss=None,
             add_hidden_layer_batchnorm=add_batchnorm,
             add_input_layer_batchnorm=False,

@@ -14,7 +14,6 @@ All models are expected to be trained with (Optional):
 from typing import Optional
 import torch
 import torch.nn.functional as F
-from torch.special import expit
 import pytorch_lightning as pl
 
 
@@ -62,74 +61,43 @@ class GenotypeAutoencoder(pl.LightningModule):
             geno_std = None
 
         geno_dosage = geno_dosage.to(torch.float32)
+        n_mb, n_snps = geno_dosage.shape
 
         if self.use_standardized_genotype:
             if geno_std is None:
                 raise RuntimeError(f"No standardized genotypes provided in "
                                    f"the dataset. Batch: {batch}")
-            geno_logits = self.forward(geno_std)
+            x = self.forward(geno_std)
         else:
-            geno_logits = self.forward(geno_dosage)
+            x = self.forward(geno_dosage)
 
-        geno_p = expit(geno_logits)
-        reconstruction_dosage = 2 * geno_p
+        x = x.view(n_mb, n_snps, 3)
+        x = F.log_softmax(x, dim=2)
+        reconstruction = torch.argmax(x, dim=2)
 
-        reconstruction_mse = F.mse_loss(reconstruction_dosage, geno_dosage)
-
-        p_geno2 = geno_p ** 2
-        p_geno1 = 2 * geno_p * (1 - geno_p) + 0.5
-        p_geno0 = (1 - geno_p) ** 2
-
-        smax_0 = torch.exp(p_geno0)
-        smax_1 = torch.exp(p_geno1)
-        smax_2 = torch.exp(p_geno2)
-
-        smax_c = smax_0 + smax_1 + smax_2
-
-        def clamp(x):
-            return torch.clamp(x, min=-10)
-
-        preds_three_classes = -clamp(torch.log(torch.stack((
-            smax_0 / smax_c,
-            smax_1 / smax_c,
-            smax_2 / smax_c
-        ), dim=2)))
-
-        if self.softmax_weights is not None:
-            preds_three_classes *= self.softmax_weights
-
-        # Index to get the target likelihood.
         hard_calls = dosage_to_hard_call(geno_dosage)
-        likelihoods = torch.gather(
-            preds_three_classes,
+        log_likelihoods = torch.gather(
+            x,
             dim=2,
             index=hard_calls.unsqueeze(-1)
         )
 
-        mean_like = likelihoods.mean()
-        if torch.isnan(mean_like):
+        loss = (-log_likelihoods).mean()
+
+        if torch.isnan(loss):
             print("==> LOSS IS NAN!! <==")
 
         if log:
-            reconstruction_hard_calls = dosage_to_hard_call(
-                reconstruction_dosage
-            )
-
             accurate_reconstruction = (
-                reconstruction_hard_calls == hard_calls
+                reconstruction == hard_calls
             ).to(torch.float32)
 
             reconstruction_acc = accurate_reconstruction.mean()
 
-            reconstruction_nll = (
-                -geno_dosage * clamp(torch.log(geno_p))
-                - (2 - geno_dosage) * clamp(torch.log(1 - geno_p))
-            ).mean()
-
             # This may be computationally intensive but can be useful to debug.
-            homo_min = hard_calls == 0
+            homo_min = hard_calls == 2
             het = hard_calls == 1
-            homo_maj = hard_calls == 2
+            homo_maj = hard_calls == 0
 
             self.log(f"{log_prefix}homo_min_acc",
                      accurate_reconstruction[homo_min].mean())
@@ -138,13 +106,10 @@ class GenotypeAutoencoder(pl.LightningModule):
             self.log(f"{log_prefix}homo_maj_acc",
                      accurate_reconstruction[homo_maj].mean())
 
-            self.log(f"{log_prefix}mean_like", mean_like)
-
             self.log(f"{log_prefix}reconstruction_acc", reconstruction_acc)
-            self.log(f"{log_prefix}reconstruction_nll", reconstruction_nll)
-            self.log(f"{log_prefix}reconstruction_mse", reconstruction_mse)
+            self.log(f"{log_prefix}loss", loss)
 
-        return mean_like
+        return loss
 
     def encode(self, geno_std):
         """Return the latent code for a given sample."""
@@ -166,24 +131,6 @@ class GenotypeAutoencoder(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, log=True, log_prefix="test_")
-
-    def _get_x_from_batch(self, batch):
-        if len(batch) == 2:
-            geno_dosage, geno_std = batch
-        else:
-            geno_dosage = batch[0]
-            geno_std = None
-
-        if self.use_standardized_genotype:
-            if geno_std is None:
-                raise ValueError(
-                    "Can't train GenotypeAutoencoder on standardized genotypes"
-                    "unless supported by the dataset."
-                )
-
-            return geno_std.to(torch.float32)
-
-        return geno_dosage.to(torch.float32)
 
     def configure_optimizers(self):
         return torch.optim.Adam(
