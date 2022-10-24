@@ -1,6 +1,6 @@
 def get_block_trainer_config():
     return {
-        "lr": 1e-3,
+        "lr": 1e-5,
         "batch_size": 256,
         "max_epochs": 1000,
         "weight_decay": 1e-5,

@@ -8,6 +8,10 @@ import argparse
 import pprint
 from typing import Dict
 from pkg_resources import resource_filename
+from pytorch_genotypes.block_trainer.utils import (
+    geno_freqs_from_maf,
+    variant_entropy_from_geno_freqs
+)
 
 from pytorch_genotypes.dataset.core import FixedSizeChunks
 
@@ -108,6 +112,24 @@ def train(args):
     train_indices = np.setdiff1d(np.arange(len(backend)), val_indices)
 
     full_dataset = chunks.get_dataset_for_chunk_id(args.chunk_index)
+
+    # We have a per variant weight that is the entropy and a genotype weight
+    # that is the inverse of its frequency.
+    mafs = torch.nanmean(
+        full_dataset.tensors[0][train_indices, :].to(torch.float32),
+        dim=0
+    ) / 2
+    geno_freqs = geno_freqs_from_maf(mafs)
+    variant_entropies = variant_entropy_from_geno_freqs(geno_freqs)
+
+    max_ent = torch.max(variant_entropies)
+
+    clipped_inv_freqs = torch.clip(1 / geno_freqs, max=10)
+
+    # penalty_weights = clipped_inv_freqs * variant_entropies[:, None]
+    # penalty_weights = clipped_inv_freqs
+    penalty_weights = variant_entropies[:, None]
+
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset = Subset(full_dataset, val_indices)
 
@@ -142,7 +164,7 @@ def train(args):
         dec_h_dropout_p=config["dec_h_dropout_p"],
         activation=config["model/activation"],
         use_standardized_genotype=config["use_standardized_genotype"],
-        softmax_weights=torch.Tensor([1, 3, 1])
+        softmax_weights=penalty_weights
     )
     print(model)
 
