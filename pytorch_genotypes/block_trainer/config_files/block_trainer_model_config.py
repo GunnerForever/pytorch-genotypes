@@ -1,6 +1,6 @@
 def get_block_trainer_config():
     return {
-        "lr": 1e-3,
+        "lr": 1e-4,
         "batch_size": 256,
         "max_epochs": 1000,
         "weight_decay": 1e-5,
@@ -13,5 +13,5 @@ def get_block_trainer_config():
         "model/activation": "GELU",
         "model/rep_size": 128,
         "model/enc_layers": [500, 200],
-        "model/dec_layers": [200, 200],
+        "model/dec_layers": [200, 500],
     }

@@ -51,14 +51,13 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
         self.decoder = MLP(
             rep_size,
             dec_layers,
-            chunk_size * 3,
+            chunk_size * 2,
             loss=None,
             add_hidden_layer_batchnorm=add_batchnorm,
             add_input_layer_batchnorm=False,
             input_dropout_p=None,  # No dropout at repr. level.
             hidden_dropout_p=dec_h_dropout_p,
             activations=[getattr(nn, activation)()],
-            do_chunk="output",
             chunk_size=partial_chunk_size,
         )
 

@@ -14,6 +14,7 @@ All models are expected to be trained with (Optional):
 from typing import Optional
 import torch
 import torch.nn.functional as F
+from torch.special import expit
 import pytorch_lightning as pl
 
 
@@ -71,25 +72,31 @@ class GenotypeAutoencoder(pl.LightningModule):
         else:
             x = self.forward(geno_dosage)
 
-        x = x.view(n_mb, n_snps, 3)
-        x = F.log_softmax(x, dim=2)
-        reconstruction = torch.argmax(x, dim=2)
-
-        hard_calls = dosage_to_hard_call(geno_dosage)
-        log_likelihoods = torch.gather(
-            x,
-            dim=2,
-            index=hard_calls.unsqueeze(-1)
+        # dim should be mb x n_snps x 2
+        # We interpret the two last dimensions as mutation probabilities by
+        # strand.
+        x = x.view(n_mb, n_snps, 2)
+        x = expit(x)
+        reconstruction_dosage = (
+            # Tring using the first var as an indicator for heterozygotes.
+            x[:, :, 0] + (1 - x[:, :, 0]) * 2 * x[:, :, 1]
         )
 
-        loss = (-log_likelihoods).mean()
+        reconstruction_hard_calls = dosage_to_hard_call(
+            reconstruction_dosage
+        )
+
+        hard_calls = dosage_to_hard_call(geno_dosage)
+        mse = F.mse_loss(reconstruction_dosage, geno_dosage)
+
+        loss = mse
 
         if torch.isnan(loss):
             print("==> LOSS IS NAN!! <==")
 
         if log:
             accurate_reconstruction = (
-                reconstruction == hard_calls
+                reconstruction_hard_calls == hard_calls
             ).to(torch.float32)
 
             reconstruction_acc = accurate_reconstruction.mean()
