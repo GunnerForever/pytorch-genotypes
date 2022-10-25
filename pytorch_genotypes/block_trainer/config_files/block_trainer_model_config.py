@@ -12,6 +12,6 @@ def get_block_trainer_config():
         "use_standardized_genotype": False,
         "model/activation": "GELU",
         "model/rep_size": 128,
-        "model/enc_layers": [1000, 500],
-        "model/dec_layers": [500, 1000],
+        "model/enc_layers": [500, 200],
+        "model/dec_layers": [200, 200],
     }

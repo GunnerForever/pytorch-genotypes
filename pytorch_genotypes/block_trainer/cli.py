@@ -160,7 +160,9 @@ def train(args):
         dec_h_dropout_p=config["dec_h_dropout_p"],
         activation=config["model/activation"],
         use_standardized_genotype=config["use_standardized_genotype"],
-        softmax_weights=softmax_weights
+        softmax_weights=softmax_weights,
+        partial_chunk_size=200,
+        partial_connection_h=20,
     )
     print(model)
 

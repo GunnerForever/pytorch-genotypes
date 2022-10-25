@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ..modules import ChunkPartiallyConnected
+
 try:
     from typing import Literal
 except ImportError:
@@ -36,6 +38,9 @@ class MLP(pl.LightningModule):
         output_size: int,
         loss: Optional[LossString],
         use_dosage: bool = True,
+        do_chunk: Optional[Literal["input", "output"]] = None,
+        chunk_size: Optional[int] = None,
+        chunk_input_hidden_size: Optional[int] = None,
         weight_decay: Optional[float] = None,
         add_hidden_layer_batchnorm: bool = False,
         add_input_layer_batchnorm: bool = True,
@@ -57,16 +62,47 @@ class MLP(pl.LightningModule):
         if input_dropout_p is not None and input_dropout_p > 0:
             modules.append(nn.Dropout(input_dropout_p))
 
+        if do_chunk is not None and chunk_size is None:
+            raise ValueError("Provide a chunk_size if chunking is requested.")
+
+        if do_chunk == "input":
+            assert chunk_size is not None
+            if chunk_input_hidden_size is None:
+                raise ValueError("Input partial connection need a "
+                                 "'chunk_input_hidden_size' parameter.")
+
+            partial_layer = ChunkPartiallyConnected(
+                input_size,
+                chunk_input_hidden_size,
+                chunk_size=chunk_size,
+            )
+            modules.append(partial_layer)
+            input_size = partial_layer.get_effective_output_size()
+
         if hidden_dropout_p is not None and hidden_dropout_p > 0:
             activations.append(nn.Dropout(hidden_dropout_p))
 
+        hidden_layers = tuple(hidden_layers)
+
         modules.extend(build_mlp(
             input_size,
-            hidden=tuple(hidden_layers),
-            out=output_size,
+            hidden=hidden_layers,
+            out=output_size if do_chunk != "output" else None,
             activations=activations,
             add_batchnorm=add_hidden_layer_batchnorm,
         ))
+
+        if do_chunk == "output":
+            assert chunk_size is not None
+
+            modules.append(
+                ChunkPartiallyConnected(
+                    hidden_layers[-1],
+                    output_size,
+                    chunk_size=chunk_size,
+                    chunk_the_input=False
+                )
+            )
 
         self.model = nn.Sequential(*modules)
 

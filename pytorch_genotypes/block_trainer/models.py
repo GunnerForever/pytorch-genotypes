@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 from torch import nn
 import pytorch_lightning as pl
@@ -23,7 +24,9 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
         dec_h_dropout_p,
         activation,
         use_standardized_genotype,
-        softmax_weights
+        softmax_weights,
+        partial_chunk_size,
+        partial_connection_h,
     ):
         super().__init__(
             use_standardized_genotype=use_standardized_genotype,
@@ -39,7 +42,10 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
             add_input_layer_batchnorm=not use_standardized_genotype,
             input_dropout_p=input_dropout_p,
             hidden_dropout_p=enc_h_dropout_p,
-            activations=[getattr(nn, activation)()]
+            activations=[getattr(nn, activation)()],
+            chunk_size=partial_chunk_size,
+            do_chunk="input",
+            chunk_input_hidden_size=partial_connection_h
         )
 
         self.decoder = MLP(
@@ -51,7 +57,9 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
             add_input_layer_batchnorm=False,
             input_dropout_p=None,  # No dropout at repr. level.
             hidden_dropout_p=dec_h_dropout_p,
-            activations=[getattr(nn, activation)()]
+            activations=[getattr(nn, activation)()],
+            do_chunk="output",
+            chunk_size=partial_chunk_size,
         )
 
 
