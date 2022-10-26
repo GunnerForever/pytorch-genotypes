@@ -1,12 +1,14 @@
-from typing import Iterable, Optional, Set, Callable, Union, List
-import os
-import math
 import functools
+import math
+import os
+from collections import OrderedDict
+from typing import (Callable, Dict, Iterable, List, Optional, Set, TypeVar,
+                    Union)
 
-import torch
 import numpy as np
-from geneparse.core import GenotypesReader, Genotypes
-
+import torch
+from geneparse.core import Genotypes, GenotypesReader
+from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler
 
 VariantPredicate = Callable[[Genotypes], bool]
 TorchOrNumpyArray = Union[np.ndarray, torch.Tensor]
@@ -188,3 +190,31 @@ def get_selected_samples_and_indexer(
             indices.append(index)
 
     return samples, np.array(indices, dtype=int)
+
+
+EnvLabel = TypeVar("EnvLabel")
+
+
+class MultiEnvironmentDataloader(object):
+    def __init__(
+        self,
+        dataset: Dataset,
+        env_to_indices: Dict[EnvLabel, List[int]],
+        batch_size: int = 1,
+        **kwargs
+    ):
+        # Create a dataloader per env by creating subsets.
+        dataloaders = OrderedDict()
+        for env in env_to_indices.keys():
+            indices = env_to_indices[env]
+            sampler = SubsetRandomSampler(indices)
+            dl = DataLoader(dataset, batch_size, shuffle=False,
+                            sampler=sampler, **kwargs)
+            dataloaders[env] = dl
+
+        self.dataloaders = dataloaders
+
+    def __iter__(self):
+        for env, dl in self.dataloaders.items():
+            for batch in iter(dl):
+                yield (env, batch)

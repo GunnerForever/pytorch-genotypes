@@ -12,7 +12,7 @@ import itertools
 import collections
 from collections import defaultdict, OrderedDict
 from typing import (
-    List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional, Union, Any
+    List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional, Union, Any,
 )
 
 import torch

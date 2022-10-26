@@ -75,21 +75,30 @@ class GenotypeAutoencoder(pl.LightningModule):
         # dim should be mb x n_snps x 2
         # We interpret the two last dimensions as mutation probabilities by
         # strand.
+        hard_calls = dosage_to_hard_call(geno_dosage)
         x = x.view(n_mb, n_snps, 2)
         x = expit(x)
-        reconstruction_dosage = (
-            # Tring using the first var as an indicator for heterozygotes.
-            x[:, :, 0] + (1 - x[:, :, 0]) * 2 * x[:, :, 1]
-        )
 
+        z0 = x[:, :, 0]
+        z1 = x[:, :, 1]
+        p_1 = z0
+        p_0 = (1 - z0) * (1 - z1)
+        p_2 = (1 - z0) * z1
+
+        likelihoods = torch.dstack((p_0, p_1, p_2))
+        nll = -torch.log(torch.gather(
+            likelihoods,
+            dim=2,
+            index=hard_calls.unsqueeze(-1)
+        ))
+
+        reconstruction_dosage = p_1 + 2 * p_2
         reconstruction_hard_calls = dosage_to_hard_call(
             reconstruction_dosage
         )
 
-        hard_calls = dosage_to_hard_call(geno_dosage)
         mse = F.mse_loss(reconstruction_dosage, geno_dosage)
-
-        loss = mse
+        loss = torch.mean(nll)
 
         if torch.isnan(loss):
             print("==> LOSS IS NAN!! <==")
@@ -115,6 +124,7 @@ class GenotypeAutoencoder(pl.LightningModule):
 
             self.log(f"{log_prefix}reconstruction_acc", reconstruction_acc)
             self.log(f"{log_prefix}loss", loss)
+            self.log(f"{log_prefix}mse", mse)
 
         return loss
 
