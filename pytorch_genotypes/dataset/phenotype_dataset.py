@@ -65,9 +65,9 @@ class PhenotypeGeneticDataset(GeneticDataset):
         exogenous_columns: Optional[List[str]] = None,
         endogenous_columns: Optional[List[str]] = None,
         standardize_columns: Optional[List[str]] = None,
-        standardize_genotypes: bool = True
+        standardize_genotypes: bool = False
     ):
-        super().__init__(backend)
+        super().__init__(backend, genotype_standardization=False)
 
         if exogenous_columns is None and endogenous_columns is None:
             raise ValueError("Need to provide exogenous_columns or/and "
@@ -200,11 +200,12 @@ class PhenotypeGeneticDataset(GeneticDataset):
             has_endog = False
 
         _batch_fac = BatchFactory.union(
+            "PhenotypeDatasetBatch",
             _geno_batch_fac,
             _get_phenotype_batch_factory(has_exog, has_endog)
         )
 
-        return _batch_fac(tuple(out))
+        return _batch_fac(*out)
 
     def __len__(self):
         return len(self.idx["geno"])
