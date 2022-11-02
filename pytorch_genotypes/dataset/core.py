@@ -180,7 +180,7 @@ class GeneticDataset(Dataset):
 
         """
         # Estimate scaling on max 2k rows.
-        n = len(self)
+        n = len(self.backend)
 
         if n > max_n:
             indices = np.sort(np.random.choice(
