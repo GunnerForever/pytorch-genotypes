@@ -199,7 +199,41 @@ def get_selected_samples_and_indexer(
 EnvLabel = TypeVar("EnvLabel")
 
 
-class MultiEnvironmentIterator(object):
+class MultiEnvironmentIteratorFromMultipleDatasets(object):
+    def __init__(
+        self,
+        datasets: List[Dataset],
+        batch_size: int = 1,
+        **kwargs
+    ):
+        dataloaders = []
+        for dataset in datasets:
+            dl = DataLoader(dataset, batch_size, **kwargs)
+            dataloaders.append(dl)
+
+        self.dataloaders = dataloaders
+        self.batch_size = batch_size
+
+        self.iterators = []
+        for dl in self.dataloaders:
+            self.iterators.append(iter(dl))
+
+    def __iter__(self):
+        out = []
+
+        for i in range(len(self.iterators)):
+            try:
+                batch_li = next(self.iterators[i])
+            except StopIteration:
+                self.iterators[i] = iter(self.dataloaders[i])
+                batch_li = next(self.iterators[i])
+
+            out.append(batch_li)
+
+        yield out
+
+
+class MultiEnvironmentIteratorFromSingleDataset(object):
     def __init__(
         self,
         dataset: Dataset,

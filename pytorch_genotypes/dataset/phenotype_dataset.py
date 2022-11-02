@@ -168,7 +168,7 @@ class PhenotypeGeneticDataset(GeneticDataset):
 
         """
         # Get the genotypes from the backend.
-        geno = self.backend[self.idx["geno"][idx]]
+        geno = self.backend[self.idx["geno"][idx]].to(torch.float32)
         geno_std = None
 
         # Apply the standardization if requested.
@@ -177,7 +177,7 @@ class PhenotypeGeneticDataset(GeneticDataset):
             geno_std /= self.genotype_scaling_mean_std[1]
 
             # Impute NA to mean (0).
-            geno_std = torch.nan_to_num(geno_std, nan=0)
+            geno_std = torch.nan_to_num(geno_std, nan=0).to(torch.float32)
 
         out = [geno]
 
@@ -189,13 +189,13 @@ class PhenotypeGeneticDataset(GeneticDataset):
 
         if self.exog is not None:
             has_exog = True
-            out.append(self.exog[idx, :])
+            out.append(self.exog[idx, :].to(torch.float32))
         else:
             has_exog = False
 
         if self.endog is not None:
             has_endog = True
-            out.append(self.endog[idx, :])
+            out.append(self.endog[idx, :].to(torch.float32))
         else:
             has_endog = False
 

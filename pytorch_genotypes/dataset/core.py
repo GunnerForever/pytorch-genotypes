@@ -13,6 +13,7 @@ import collections
 from collections import defaultdict, OrderedDict
 from typing import (
     List, Type, TypeVar, Tuple, TYPE_CHECKING, Optional, Union, Any,
+    Iterable
 )
 
 import torch
@@ -366,3 +367,82 @@ class FixedSizeChunks(object):
             return TensorDataset(chunk, scaler.standardize_tensor(chunk))
 
         return TensorDataset(chunk)
+
+
+class MaskBackendWrapper(object):
+    def __init__(self, backend: GeneticDatasetBackend):
+        self.backend = backend
+
+        # If None, we keep everything.
+        self.variants_keep_indices: Optional[torch.Tensor] = None
+        self.samples_keep_indices: Optional[torch.Tensor] = None
+
+    def keep_variants(self, variants: Iterable[Variant]):
+        keep_indices = []
+        variants_set = set(variants)
+        for i, v in enumerate(self.backend.get_variants()):
+            if v in variants_set:
+                keep_indices.append(i)
+
+        self.variants_keep_indices = torch.tensor(keep_indices)
+
+    def keep_variants_indices(self, indices: Iterable[int]):
+        self.variants_keep_indices = torch.tensor(indices)
+
+    def keep_samples(self, samples: Iterable[str]):
+        keep_indices = []
+        samples_set = set(samples)
+        for i, s in enumerate(self.backend.get_samples()):
+            if s in samples_set:
+                keep_indices.append(i)
+
+        self.samples_keep_indices = torch.tensor(keep_indices)
+
+    def keep_samples_indices(self, indices: Iterable[int]):
+        self.samples_keep_indices = torch.tensor(indices)
+
+    def get_n_samples(self) -> int:
+        if self.samples_keep_indices is None:
+            return len(self.backend)
+        else:
+            return len(self.samples_keep_indices)
+
+    def get_n_variants(self) -> int:
+        if self.variants_keep_indices is None:
+            return self.backend.get_n_variants()
+        else:
+            return len(self.variants_keep_indices)
+
+    def get_samples(self) -> List[str]:
+        be_samples = self.backend.get_samples()
+        if self.samples_keep_indices is None:
+            return be_samples
+
+        return [be_samples[i] for i in self.samples_keep_indices]
+
+    def get_variants(self) -> List[Variant]:
+        be_variants = self.backend.get_variants()
+        if self.variants_keep_indices is None:
+            return be_variants
+
+        return [be_variants[i] for i in self.variants_keep_indices]
+
+    def __getitem__(self, idx: int):
+        if self.samples_keep_indices is None:
+            row = self.backend[idx]
+
+        else:
+            row = self.backend[self.samples_keep_indices[idx]]
+
+        # Subset row if needed.
+        if self.variants_keep_indices is not None:
+            return row[self.variants_keep_indices]
+        else:
+            return row
+
+    def __len__(self):
+        if self.samples_keep is None:
+            return len(self.backend)
+
+        else:
+            return torch.sum(self.samples_keep)
