@@ -36,7 +36,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "pt-geno-block-trainer=pytorch_genotypes.block_trainer.cli:main"
+            "pt-geno-block-trainer=pytorch_genotypes.block_trainer.cli:main",
+            "pt-geno-create-backend=pytorch_genotypes.dataset.cli:create_backend"  # noqa: E501
         ]
     }
 )

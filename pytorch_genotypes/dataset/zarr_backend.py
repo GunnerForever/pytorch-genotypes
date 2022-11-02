@@ -3,17 +3,21 @@ Zarr backend for pytorch genetic datasets.
 """
 
 
-from typing import Set, Iterable, Optional, List, Tuple
+import os
+import pickle
+from typing import Iterable, List, Optional, Set, Tuple
 
-from tqdm import tqdm
+import numpy as np
 import torch
 import zarr
-import numpy as np
-from numpy.typing import DTypeLike
+from zarr.convenience import PathNotFoundError
 from geneparse.core import GenotypesReader, Variant
+from numpy.typing import DTypeLike
+from tqdm import tqdm
 
 from .core import GeneticDatasetBackend
-from .utils import get_selected_samples_and_indexer, VariantPredicate
+from .utils import (VariantPredicate, get_selected_samples_and_indexer,
+                    resolve_path)
 
 
 class ZarrCache:
@@ -162,6 +166,24 @@ class ZarrBackend(GeneticDatasetBackend):
         self._z.resize(n_samples, len(variants))
         self.variants = variants
 
+    @classmethod
+    def load(cls, filename: str) -> "ZarrBackend":
+        with open(filename, "rb") as f:
+            backend = pickle.load(f)
+
+        if backend._local:
+            contexts = [
+                os.curdir,
+                os.path.dirname(filename)
+            ]
+
+            zarr_fn = resolve_path(backend._zarr_filename, contexts=contexts)
+            backend._zarr_filename = zarr_fn
+            backend._z = zarr.open(backend._zarr_filename)
+            backend.cache = ZarrCache(backend._z)
+
+        return backend
+
     def __getstate__(self):
         d = self.__dict__.copy()
         if self._local:
@@ -172,10 +194,14 @@ class ZarrBackend(GeneticDatasetBackend):
 
     def __setstate__(self, state):
         super().__setstate__(state)
-        if self._local:
-            self._z = zarr.open(self._zarr_filename)
+        try:
+            if self._local:
+                self._z = zarr.open(self._zarr_filename, mode="r")
 
-        self.cache = ZarrCache(self._z)
+            self.cache = ZarrCache(self._z)
+        except PathNotFoundError:
+            self._z = None
+            self.cache = None
 
     def __getitem__(self, idx) -> torch.Tensor:
         return self.cache.get_zarr_row(idx)

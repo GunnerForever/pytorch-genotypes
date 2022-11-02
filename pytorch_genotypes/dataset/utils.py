@@ -20,6 +20,8 @@ def resolve_path(filename: str, contexts: Optional[List[str]] = None) -> str:
         with open(filename, "r"):
             pass
         return filename
+    except IsADirectoryError:
+        return filename
     except FileNotFoundError:
         pass
 
@@ -29,6 +31,8 @@ def resolve_path(filename: str, contexts: Optional[List[str]] = None) -> str:
             try:
                 with open(cur, "r"):
                     pass
+                return cur
+            except IsADirectoryError:
                 return cur
             except FileNotFoundError:
                 pass
@@ -195,7 +199,7 @@ def get_selected_samples_and_indexer(
 EnvLabel = TypeVar("EnvLabel")
 
 
-class MultiEnvironmentDataloader(object):
+class MultiEnvironmentIterator(object):
     def __init__(
         self,
         dataset: Dataset,
@@ -207,14 +211,33 @@ class MultiEnvironmentDataloader(object):
         dataloaders = OrderedDict()
         for env in env_to_indices.keys():
             indices = env_to_indices[env]
+            if max(indices) >= len(dataset):  # type: ignore
+                raise IndexError
+
             sampler = SubsetRandomSampler(indices)
             dl = DataLoader(dataset, batch_size, shuffle=False,
                             sampler=sampler, **kwargs)
             dataloaders[env] = dl
 
         self.dataloaders = dataloaders
+        self.env_to_indices = env_to_indices
+        self.batch_size = batch_size
+
+        # Prime the iterators.
+        self.iterators = {}
+        for env, dl in self.dataloaders.items():
+            self.iterators[env] = iter(dl)
 
     def __iter__(self):
-        for env, dl in self.dataloaders.items():
-            for batch in iter(dl):
-                yield (env, batch)
+        out = []
+
+        for env in self.iterators.keys():
+            try:
+                batch_li = next(self.iterators[env])
+            except StopIteration:
+                self.iterators[env] = iter(self.dataloaders[env])
+                batch_li = next(self.iterators[env])
+
+            out.append(batch_li)
+
+        yield out
