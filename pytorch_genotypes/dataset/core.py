@@ -19,7 +19,7 @@ from typing import (
 import torch
 import numpy as np
 from geneparse import Variant
-from torch.utils.data.dataset import Dataset, TensorDataset
+from torch.utils.data.dataset import Dataset
 
 from .utils import TensorScaler
 
@@ -158,6 +158,26 @@ class GeneticDatasetBackend(object):
             out[i, :] = self[i][left:(right+1)]
 
         return out
+
+
+class GeneticDatasetBackendWrapper(GeneticDatasetBackend):
+    """Class that mimics a backend but applies other forms of filtering or
+    processing.
+
+    For examples, backends that represent subsets of variants or individuals
+    from a "parent" backend.
+
+    Serialization would require recursion into the parent backend and would
+    be fairly convoluted. For this reason, we don't support pickling of
+    wrappers. However, they should be easy to recreate using the same
+    parent backend and arguments.
+
+    """
+    def __getstate__(self) -> dict:
+        raise NotImplementedError()
+
+    def __setstate__(self, state: dict):
+        raise NotImplementedError()
 
 
 class GeneticDataset(Dataset):
@@ -347,29 +367,29 @@ class FixedSizeChunks(object):
             columns=["name", "chrom", "pos", "allele1", "allele2"]
         )
 
-    def get_tensor_for_chunk_id(self, chunk_id: int) -> torch.Tensor:
-        chunk = self.get_chunk(chunk_id)
-        assert chunk.first_variant_index is not None
-        assert chunk.last_variant_index is not None
-
-        return self.backend.extract_range(
-            chunk.first_variant_index, chunk.last_variant_index
-        )
-
     def get_dataset_for_chunk_id(
         self,
         chunk_id: int,
         genotype_standardization: bool = False
-    ) -> TensorDataset:
-        chunk = self.get_tensor_for_chunk_id(chunk_id)
-        if genotype_standardization:
-            scaler = TensorScaler(chunk)
-            return TensorDataset(chunk, scaler.standardize_tensor(chunk))
+    ) -> GeneticDataset:
+        # For now, we use the MaskBackendWrapper, but we could consider
+        # implementing a "RangeBackendWrapper" which could be more efficient
+        # for large chunks.
+        chunk = self.get_chunk(chunk_id)
+        assert chunk.first_variant_index is not None
+        assert chunk.last_variant_index is not None
 
-        return TensorDataset(chunk)
+        indices = torch.arange(
+            chunk.first_variant_index, chunk.last_variant_index + 1
+        )
+
+        backend = MaskBackendWrapper(self.backend)
+        backend.keep_variants_indices(indices)
+
+        return GeneticDataset(backend, genotype_standardization)
 
 
-class MaskBackendWrapper(object):
+class MaskBackendWrapper(GeneticDatasetBackendWrapper):
     def __init__(self, backend: GeneticDatasetBackend):
         self.backend = backend
 
