@@ -475,4 +475,4 @@ class MaskBackendWrapper(GeneticDatasetBackendWrapper):
             return len(self.backend)
 
         else:
-            return torch.sum(self.samples_keep_indices)
+            return len(self.samples_keep_indices)
