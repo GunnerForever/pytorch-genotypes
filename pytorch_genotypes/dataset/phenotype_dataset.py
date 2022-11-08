@@ -167,7 +167,6 @@ class PhenotypeGeneticDataset(GeneticDataset):
             - endogenous
 
         """
-        print("dataset: ", idx, " -- ", "backend: ", self.idx["geno"][idx])
         # Get the genotypes from the backend.
         geno = self.backend[self.idx["geno"][idx]].to(torch.float32)
         geno_std = None

@@ -1,10 +1,11 @@
-from typing import Union, Dict, Optional, Tuple
+from typing import Union, Dict, Optional, Tuple, Set
 import argparse
 import re
 import os
 import pickle
 
 import geneparse
+import pandas as pd
 
 from . import ZarrBackend, NumpyBackend
 
@@ -76,23 +77,55 @@ def _cli_args_to_kwargs(s: Optional[str]) -> Dict[str, PrimitiveArg]:
     return kwargs
 
 
+def _parse_keep(filename: str) -> Set[str]:
+    with open(filename, "rt") as f:
+        first_line = next(f).strip()
+        first_line_split = first_line.split()
+        if len(first_line_split) == 2:
+            # Assume FID, IID
+            names = ["FID", "IID"]
+        elif len(first_line_split) == 1:
+            names = ["IID"]
+
+    li = pd.read_csv(
+        filename,
+        delim_whitespace=True,
+        dtype={"IID": str},
+        comment="#",
+        names=names
+    )["IID"].values
+
+    return set(str(el) for el in li)
+
+
 def _create_backend_parse_args():
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--format", "-f", choices=["plink", "bgen"],
                         required=True)
+
     parser.add_argument("filename", type=str)
+
     parser.add_argument(
         "--genotype-reader-args", type=str, default=None,
         help="Arguments that will be passed to the genotype reader. The "
              "format to provide arguments is: 'key1=val2;key2=val2,...'"
     )
+
     parser.add_argument("--backend-format", choices=["zarr", "numpy"],
                         default="zarr")
+
     parser.add_argument(
         "--backend-args", type=str, default=None,
         help="Arguments that will be passed to the backend constructor. The "
              "format to provide arguments is: 'key1=val2;key2=val2,...'"
     )
+
+    parser.add_argument(
+        "--keep-samples-filename", type=str, default=None,
+        help="Path to a keep file with sample IDs to keep."
+    )
+
     parser.add_argument("--output-prefix", "-o", default=None, type=str)
     args = parser.parse_args()
 
@@ -103,6 +136,12 @@ def _create_backend_parse_args():
         else:
             # Filename is already a prefix (e.g. for plink)
             args.output_prefix = args.filename
+
+    # Parse the keep file if needed.
+    if args.keep_samples_filename is not None:
+        args.keep = _parse_keep(args.keep_samples_filename)
+    else:
+        args.keep = None
 
     return args
 
@@ -116,6 +155,7 @@ def create_backend():
     )
 
     backend_args = _cli_args_to_kwargs(args.backend_args)
+    backend_args["keep_samples"] = args.keep
 
     work_dir = os.path.dirname(args.output_prefix)
     args.output_prefix = os.path.basename(args.output_prefix)

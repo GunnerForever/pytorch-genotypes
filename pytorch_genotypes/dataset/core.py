@@ -405,6 +405,19 @@ class MaskBackendWrapper(GeneticDatasetBackendWrapper):
                 keep_indices.append(i)
 
         self.variants_keep_indices = torch.tensor(keep_indices)
+        if len(self.variants_keep_indices) == 0:
+            raise ValueError("No overlapping variants.")
+
+    def keep_variants_names(self, names: Iterable[str]):
+        keep_indices = []
+        names_set = set(names)
+        for i, v in enumerate(self.backend.get_variants()):
+            if v.name in names_set:
+                keep_indices.append(i)
+
+        self.variants_keep_indices = torch.tensor(keep_indices)
+        if len(self.variants_keep_indices) == 0:
+            raise ValueError("No overlapping variants.")
 
     def keep_variants_indices(self, indices: Iterable[int]):
         if isinstance(indices, np.ndarray):

@@ -5,18 +5,18 @@ Zarr backend for pytorch genetic datasets.
 
 import os
 import pickle
-from typing import Iterable, List, Optional, Set, Tuple, Sized, Iterator, Union
+from typing import Iterable, List, Optional, Set, Tuple, Sized, Iterator
 
 import numpy as np
 import torch
+from torch.utils.data import Sampler
 import zarr
 from zarr.convenience import PathNotFoundError
 from geneparse.core import GenotypesReader, Variant
 from numpy.typing import DTypeLike
-from torch.utils.data import Sampler
 from tqdm import tqdm
 
-from .core import GeneticDatasetBackend
+from .core import GeneticDatasetBackend, GeneticDataset, MaskBackendWrapper
 from .utils import (VariantPredicate, get_selected_samples_and_indexer,
                     resolve_path)
 
@@ -241,49 +241,30 @@ class VariantBufferedZarrWriter(object):
             self.flush_buffer()
 
 
-class ContiguousSamplerFromIndices(Sampler):
-    """Sampler subclass that will sample within chunks while considering
-    that the sample indices have been subset.
-
-    Useful when using masked backends.
-
-    """
-    def __init__(
-        self,
-        indices: Union[torch.Tensor, np.ndarray],
-        chunk_size: int
-    ):
-        # Map all indices to a chunk id.
-        if isinstance(indices, np.ndarray):
-            indices_tens = torch.from_numpy(indices)
-        else:
-            indices_tens = indices
-
-        self.indices = torch.sort(indices_tens)[0]
-        self.chunk_ids = self.indices // chunk_size
-
-    def __iter__(self):
-        last_chunk = torch.max(self.chunk_ids)
-        for chunk_id in range(last_chunk + 1):
-            cur_indices = self.indices[self.chunk_ids == chunk_id]
-            perm = torch.randperm(len(cur_indices))
-
-            for idx in perm:
-                yield cur_indices[idx]
-
-    def __len__(self):
-        return len(self.indices)
-
-
-class CacheAwareSampler(Sampler):
+class ZarrCacheAwareSampler(Sampler):
     """Sampler subclass that will sample within a chunk at a time.
-
     This takes advantage of the Zarr row-wise caching.
-
     """
-    def __init__(self, data_source: Sized, chunk_size: int):
-        self.dataset = data_source
-        self.chunk_size = chunk_size
+    def __init__(self, dataset: GeneticDataset):
+        self.dataset = dataset
+
+        backend: GeneticDatasetBackend = self.dataset.backend
+
+        if isinstance(backend, MaskBackendWrapper):
+            # Check if samples have been subset.
+            if backend.samples_keep_indices is not None:
+                raise ValueError(
+                    "Can't use CacheAwareSampler if samples have been masked. "
+                    "To achieve this with reasonable performance, you need to "
+                    "filter samples at backend creation."
+                )
+            else:
+                backend = backend.backend
+
+        if not isinstance(backend, ZarrBackend):
+            raise ValueError(type(self.dataset.backend))
+
+        self.chunk_size = backend._z.chunks[0]
 
     def __iter__(self) -> Iterator:
         cur_chunk = 0
