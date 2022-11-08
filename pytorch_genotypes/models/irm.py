@@ -30,6 +30,9 @@ class LinearIRM(pl.LightningModule):
         else:
             raise ValueError(f"Unsupported loss '{loss}'.")
 
+        print("Initializing IRM with hyperparameters:")
+        print(self.hparams)
+
     def _irm_penalty(self, y_hat, y):
         w = torch.tensor(
             1.,
@@ -46,42 +49,56 @@ class LinearIRM(pl.LightningModule):
         return torch.sum(grad_1 * grad_2)
 
     def training_step(self, batch, batch_idx):
-        env_weights = torch.tensor(
-            [len(x_e) for x_e, _ in batch],
-            device=self.device,
-            dtype=torch.float32
-        )
-        env_weights /= torch.sum(env_weights)
+        return self._step(batch, batch_idx, "train_")
+
+    def validation_step(self, batch, batch_idx):
+        torch.set_grad_enabled(True)
+        return self._step(batch, batch_idx, "val_")
+
+    def _step(self, batch, batch_idx, prefix=""):
+        # env_ns = torch.tensor(
+        #     [x_e.shape[0] for x_e, _ in batch],
+        #     dtype=torch.float32,
+        #     device=self.device
+        # )
+        # env_weights = env_ns / torch.sum(env_ns)
+        # env_weights_iter = iter(env_weights)
 
         loss = 0.0
         penalty = 0.0
 
-        for env_weight, batch_e in zip(env_weights, batch):
-            x_e, y_e = batch_e
-
+        for x_e, y_e in batch:
             x_e = x_e.to(torch.float32)
             y_e = y_e.to(torch.float32)
 
             y_hat_e = self.betas(x_e)
-            env_loss = env_weight * self.loss(y_hat_e, y_e)
-            env_penalty = env_weight * self._irm_penalty(y_hat_e, y_e)
+            env_loss = self.loss(y_hat_e, y_e)
+            env_penalty = self._irm_penalty(y_hat_e, y_e)
 
             loss += env_loss
             penalty += env_penalty
 
-        irm_loss = loss + (self.hparams.irm_lam * penalty)
+        loss /= len(batch)
+        penalty /= len(batch)
 
-        self.log("penalty", penalty)
-        self.log("erm_loss", loss)
-        self.log("irm_loss", irm_loss)
+        l2 = torch.norm(self.betas.weight, 2)
+        irm_loss = (
+            loss +
+            (self.hparams.irm_lam * penalty) +
+            (self.hparams.weight_decay * l2)
+        )
+
+        self.log(f"{prefix}penalty", penalty)
+        self.log(f"{prefix}erm_loss", loss)
+        self.log(f"{prefix}irm_loss", irm_loss)
+        self.log("l2", l2)
 
         return irm_loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(
+        return torch.optim.LBFGS(
             self.parameters(),
             lr=self.hparams.lr,
-            weight_decay=self.hparams.weight_decay
         )
 
 

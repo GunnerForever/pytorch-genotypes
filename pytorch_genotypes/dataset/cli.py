@@ -1,4 +1,4 @@
-from typing import Union, Dict, Optional
+from typing import Union, Dict, Optional, Tuple
 import argparse
 import re
 import os
@@ -10,9 +10,38 @@ from . import ZarrBackend, NumpyBackend
 
 
 RE_FILE_EXT = re.compile(r"\.([A-Za-z0-9]+)(\.gz)?$")
+TUPLE_REGEX = re.compile(r"\(((.+),)+(.+)\)")
 
 
-PrimitiveArg = Union[str, int, float]
+PrimitiveArg = Union[
+    str,
+    int,
+    float,
+    Tuple[int, ...],
+    Tuple[float, ...]
+]
+
+
+def _parse_tuple(s: str) -> Union[Tuple[int, ...], Tuple[float, ...]]:
+    elements = [e.strip() for e in s.strip("()").split(",")]
+    while True:
+        try:
+            int(elements[0])
+            t: type = int
+            break
+        except ValueError:
+            pass
+
+        try:
+            float(elements[0])
+            t = float
+            break
+        except ValueError:
+            pass
+
+        raise ValueError("Only support for int and float in tuple parsing.")
+
+    return tuple(t(e) for e in elements)
 
 
 def _cli_args_to_kwargs(s: Optional[str]) -> Dict[str, PrimitiveArg]:
@@ -21,7 +50,7 @@ def _cli_args_to_kwargs(s: Optional[str]) -> Dict[str, PrimitiveArg]:
     if s is None:
         return kwargs
 
-    for arg in s.split(","):
+    for arg in s.split(";"):
         arg = arg.strip()
 
         key, value = arg.split("=")
@@ -29,16 +58,20 @@ def _cli_args_to_kwargs(s: Optional[str]) -> Dict[str, PrimitiveArg]:
         key = key.strip()
         value = value.strip()
 
-        cast_val: PrimitiveArg = value
-        if value.isdigit():
-            cast_val = int(value)
-        else:
-            try:
-                cast_val = float(value)
-            except ValueError:
-                pass
+        if TUPLE_REGEX.match(value):
+            kwargs[key] = _parse_tuple(value)
 
-        kwargs[key] = cast_val
+        else:
+            cast_val: PrimitiveArg = value
+            try:
+                cast_val = int(value)
+            except ValueError:
+                try:
+                    cast_val = float(value)
+                except ValueError:
+                    pass
+
+            kwargs[key] = cast_val
 
     return kwargs
 
@@ -51,14 +84,14 @@ def _create_backend_parse_args():
     parser.add_argument(
         "--genotype-reader-args", type=str, default=None,
         help="Arguments that will be passed to the genotype reader. The "
-             "format to provide arguments is: 'key1=val2,key2=val2,...'"
+             "format to provide arguments is: 'key1=val2;key2=val2,...'"
     )
     parser.add_argument("--backend-format", choices=["zarr", "numpy"],
                         default="zarr")
     parser.add_argument(
         "--backend-args", type=str, default=None,
         help="Arguments that will be passed to the backend constructor. The "
-             "format to provide arguments is: 'key1=val2,key2=val2,...'"
+             "format to provide arguments is: 'key1=val2;key2=val2,...'"
     )
     parser.add_argument("--output-prefix", "-o", default=None, type=str)
     args = parser.parse_args()

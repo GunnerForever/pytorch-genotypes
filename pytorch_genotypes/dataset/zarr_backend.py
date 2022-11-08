@@ -5,7 +5,7 @@ Zarr backend for pytorch genetic datasets.
 
 import os
 import pickle
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Iterable, List, Optional, Set, Tuple, Sized, Iterator, Union
 
 import numpy as np
 import torch
@@ -13,6 +13,7 @@ import zarr
 from zarr.convenience import PathNotFoundError
 from geneparse.core import GenotypesReader, Variant
 from numpy.typing import DTypeLike
+from torch.utils.data import Sampler
 from tqdm import tqdm
 
 from .core import GeneticDatasetBackend
@@ -134,10 +135,10 @@ class ZarrBackend(GeneticDatasetBackend):
 
     def _fill_array(self, reader, predicates, dtype, progress):
         variants = []
-        # We target using ~8GB of memory max. Making this configurable would
+        # We target using ~6GB of memory max. Making this configurable would
         # be nice. Assuming geneparse uses float64.
         n_samples = self.get_n_samples()
-        buf_size = round(8e9 / (n_samples * 8))
+        buf_size = round(6e9 / (n_samples * 8))
 
         with VariantBufferedZarrWriter(self._z, buf_size, dtype) as zarr_writer:  # noqa: E501
             if progress:
@@ -238,3 +239,68 @@ class VariantBufferedZarrWriter(object):
     def __exit__(self, *args):
         if self.buffer:
             self.flush_buffer()
+
+
+class ContiguousSamplerFromIndices(Sampler):
+    """Sampler subclass that will sample within chunks while considering
+    that the sample indices have been subset.
+
+    Useful when using masked backends.
+
+    """
+    def __init__(
+        self,
+        indices: Union[torch.Tensor, np.ndarray],
+        chunk_size: int
+    ):
+        # Map all indices to a chunk id.
+        if isinstance(indices, np.ndarray):
+            indices_tens = torch.from_numpy(indices)
+        else:
+            indices_tens = indices
+
+        self.indices = torch.sort(indices_tens)[0]
+        self.chunk_ids = self.indices // chunk_size
+
+    def __iter__(self):
+        last_chunk = torch.max(self.chunk_ids)
+        for chunk_id in range(last_chunk + 1):
+            cur_indices = self.indices[self.chunk_ids == chunk_id]
+            perm = torch.randperm(len(cur_indices))
+
+            for idx in perm:
+                yield cur_indices[idx]
+
+    def __len__(self):
+        return len(self.indices)
+
+
+class CacheAwareSampler(Sampler):
+    """Sampler subclass that will sample within a chunk at a time.
+
+    This takes advantage of the Zarr row-wise caching.
+
+    """
+    def __init__(self, data_source: Sized, chunk_size: int):
+        self.dataset = data_source
+        self.chunk_size = chunk_size
+
+    def __iter__(self) -> Iterator:
+        cur_chunk = 0
+        n = len(self)
+        stop = False
+        while not stop:
+            left = cur_chunk * self.chunk_size
+
+            if left + self.chunk_size > n:
+                max_offset = n - left
+                stop = True
+            else:
+                max_offset = self.chunk_size
+
+            permutation = torch.randperm(max_offset)
+            for offset in permutation:
+                yield left + offset
+
+    def __len__(self) -> int:
+        return len(self.dataset)

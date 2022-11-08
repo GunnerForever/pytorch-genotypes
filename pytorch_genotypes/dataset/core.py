@@ -414,22 +414,30 @@ class MaskBackendWrapper(GeneticDatasetBackendWrapper):
         else:
             self.variants_keep_indices = torch.tensor(indices)
 
-    def keep_samples(self, samples: Iterable[str]):
+    def keep_samples(self, samples: Iterable[str], sort: bool = False):
         keep_indices = []
         samples_set = set(samples)
         for i, s in enumerate(self.backend.get_samples()):
             if s in samples_set:
                 keep_indices.append(i)
 
+        if sort:
+            keep_indices = sorted(keep_indices)
+
         self.samples_keep_indices = torch.tensor(keep_indices)
 
-    def keep_samples_indices(self, indices: Iterable[int]):
+    def keep_samples_indices(self, indices: Iterable[int], sort: bool = False):
         if isinstance(indices, np.ndarray):
             self.samples_keep_indices = torch.from_numpy(indices)
         if isinstance(indices, torch.Tensor):
             self.samples_keep_indices = indices
         else:
             self.samples_keep_indices = torch.tensor(indices)
+
+        if sort:
+            self.samples_keep_indices = torch.sort(
+                self.samples_keep_indices
+            )[0]
 
     def get_n_samples(self) -> int:
         if self.samples_keep_indices is None:

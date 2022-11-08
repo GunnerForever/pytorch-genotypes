@@ -8,7 +8,7 @@ from typing import (Callable, Dict, Iterable, List, Optional, Set, TypeVar,
 import numpy as np
 import torch
 from geneparse.core import Genotypes, GenotypesReader
-from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler
+from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler, Sampler
 
 VariantPredicate = Callable[[Genotypes], bool]
 TorchOrNumpyArray = Union[np.ndarray, torch.Tensor]
@@ -204,11 +204,20 @@ class MultiEnvironmentIteratorFromMultipleDatasets(object):
         self,
         datasets: List[Dataset],
         batch_size: int = 1,
+        sampler_from_dataset: Optional[Callable[[Dataset], Sampler]] = None,
         **kwargs
     ):
         dataloaders = []
         for dataset in datasets:
-            dl = DataLoader(dataset, batch_size, **kwargs)
+            # Allow custom samplers created from a callback.
+            if sampler_from_dataset is not None:
+                sampler: Optional[Sampler] = sampler_from_dataset(dataset)
+            elif "sampler" in kwargs:
+                sampler = kwargs["sampler"]
+            else:
+                sampler = None
+
+            dl = DataLoader(dataset, batch_size, sampler=sampler, **kwargs)
             dataloaders.append(dl)
 
         self.dataloaders = dataloaders
