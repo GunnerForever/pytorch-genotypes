@@ -18,7 +18,8 @@ from ..dataset.utils import MultiEnvironmentIteratorFromSingleDataset
 
 
 class LinearIRM(pl.LightningModule):
-    def __init__(self, n_input, lr, irm_lam=1, loss="mse", weight_decay=0):
+    def __init__(self, n_input, lr, irm_lam=1, loss="mse", weight_decay=0,
+                 l1_penalty=0):
         super().__init__()
         self.save_hyperparameters()
         self.betas = nn.Linear(n_input, 1, dtype=torch.float32)
@@ -56,16 +57,12 @@ class LinearIRM(pl.LightningModule):
         return self._step(batch, batch_idx, "val_")
 
     def _step(self, batch, batch_idx, prefix=""):
-        # env_ns = torch.tensor(
-        #     [x_e.shape[0] for x_e, _ in batch],
-        #     dtype=torch.float32,
-        #     device=self.device
-        # )
-        # env_weights = env_ns / torch.sum(env_ns)
-        # env_weights_iter = iter(env_weights)
-
         loss = 0.0
         penalty = 0.0
+
+        # Calculate weight norms for penalized models.
+        l1 = torch.norm(self.betas.weight, 1)
+        l2 = torch.norm(self.betas.weight, 2)
 
         for x_e, y_e in batch:
             x_e = x_e.to(torch.float32)
@@ -81,17 +78,18 @@ class LinearIRM(pl.LightningModule):
         loss /= len(batch)
         penalty /= len(batch)
 
-        l2 = torch.norm(self.betas.weight, 2)
         irm_loss = (
             loss +
             (self.hparams.irm_lam * penalty) +
-            (self.hparams.weight_decay * l2)
+            (self.hparams.weight_decay * l2) +
+            (self.hparams.l1_penalty * l1)
         )
 
         self.log(f"{prefix}penalty", penalty)
         self.log(f"{prefix}erm_loss", loss)
         self.log(f"{prefix}irm_loss", irm_loss)
         self.log("l2", l2)
+        self.log("l1", l1)
 
         return irm_loss
 
@@ -100,6 +98,98 @@ class LinearIRM(pl.LightningModule):
             self.parameters(),
             lr=self.hparams.lr,
         )
+
+
+class WindowedLinearIRM(LinearIRM):
+    def __init__(
+        self,
+        windows: torch.Tensor,
+        *args, **kwargs
+    ):
+        """Linear IRM where the penalty is applied in windows.
+
+        The windows should be defined as a p by 2 tensor where p is the number
+        of windows.
+
+        """
+        super().__init__(*args, **kwargs)
+
+    def get_penalties(self, x_e, y_e):
+        n_windows = self.hparams.windows.shape[0]
+
+        # Compute penalty by window.
+        penalties = torch.empty(
+            n_windows,
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        for i in range(n_windows):
+            left, right = self.hparams.windows[i, :]
+
+            x_e_local = x_e[:, left:(right+1)]  # n x m
+            w = self.betas.weight[:, left:(right+1)]  # 1 x m
+            y_hat_e_local = x_e_local @ w.T
+
+            window_penalty = self._irm_penalty(y_hat_e_local, y_e)
+            penalties[i] = window_penalty
+
+        return penalties
+
+    def _step(self, batch, batch_idx, prefix=""):
+        loss = 0.0
+        penalty = 0.0
+
+        # Calculate weight norms for penalized models.
+        l1 = torch.norm(self.betas.weight, 1)
+        l2 = torch.norm(self.betas.weight, 2)
+
+        for x_e, y_e in batch:
+            x_e = x_e.to(torch.float32)
+            y_e = y_e.to(torch.float32)
+
+            y_hat_e = self.betas(x_e)
+            env_loss = self.loss(y_hat_e, y_e)
+
+            penalties = self.get_penalties(x_e, y_e)
+
+            loss += env_loss
+            penalty += torch.norm(penalties) / self.hparams.windows.shape[0]
+
+        loss /= len(batch)
+        penalty /= len(batch)
+
+        irm_loss = (
+            loss +
+            (self.hparams.irm_lam * penalty) +
+            (self.hparams.weight_decay * l2) +
+            (self.hparams.l1_penalty * l1)
+        )
+
+        self.log(f"{prefix}penalty", penalty)
+        self.log(f"{prefix}erm_loss", loss)
+        self.log(f"{prefix}irm_loss", irm_loss)
+        self.log("l2", l2)
+        self.log("l1", l1)
+
+        return irm_loss
+
+
+def make_fixed_windows(seq_len: int, window_size: int) -> torch.Tensor:
+    """Make fixed-size windows for the WindowedLinearIRM."""
+    windows = []
+    left = 0
+    right = 0
+
+    while left <= seq_len - 1:
+        right = left + window_size - 1
+        if right >= seq_len:
+            right = seq_len - 1
+
+        windows.append((left, right))
+        left = right + 1
+
+    return torch.tensor(windows)
 
 
 def test():

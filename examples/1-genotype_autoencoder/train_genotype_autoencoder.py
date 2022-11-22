@@ -36,14 +36,25 @@ def train_genotype_autoencoder(args, _backend=None):
     print("Initializing weights")
 
     # Parse encoder arguments and initialize.
-    enc_layers = [nn.BatchNorm1d(args.n_variants)]
+    enc_layers = [
+        nn.BatchNorm1d(args.n_variants),
+        ChunkPartiallyConnected(
+            args.n_variants,
+            args.enc_hidden[0],
+            chunk_size=5000
+        )
+    ]
+
+    hidden_layer_sizes = args.enc_hidden[1:]
+    output_layer_size = hidden_layer_sizes.pop()
+
     enc_layers.extend(build_mlp(
-        args.n_variants,
-        (64, ),
-        7,
-        add_batchnorm=False,
-        activations=[nn.GELU()]
+        enc_layers[-1].get_effective_output_size(),
+        hidden_layer_sizes,
+        output_layer_size,
+        add_batchnorm=args.enc_add_batchnorm,
     ))
+
     enc_layers = nn.Sequential(*enc_layers)
 
     encoder = nn.Sequential(*enc_layers)
