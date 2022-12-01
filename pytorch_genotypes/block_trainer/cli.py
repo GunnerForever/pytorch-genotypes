@@ -12,7 +12,6 @@ from pkg_resources import resource_filename
 from pytorch_genotypes.dataset.core import FixedSizeChunks
 
 import numpy as np
-import torch
 from torch.utils.data import DataLoader, Subset
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
@@ -20,7 +19,6 @@ from pytorch_lightning.callbacks import (
 )
 
 from .models import ChildBlockAutoencoder
-from .utils import geno_freqs_from_maf
 
 from ..dataset import BACKENDS
 
@@ -110,22 +108,6 @@ def train(args):
 
     full_dataset = chunks.get_dataset_for_chunk_id(args.chunk_index)
 
-    # We have a per variant weight that is the entropy and a genotype weight
-    # that is the inverse of its frequency.
-    mafs = torch.nanmean(
-        full_dataset.tensors[0][train_indices, :].to(torch.float32),
-        dim=0
-    ) / 2
-    geno_freqs = geno_freqs_from_maf(mafs)
-    # variant_entropies = variant_entropy_from_geno_freqs(geno_freqs)
-
-    # max_ent = torch.max(variant_entropies)
-    clipped_inv_freqs = torch.clip(1 / geno_freqs, max=100)
-
-    # penalty_weights = clipped_inv_freqs * variant_entropies[:, None]
-    softmax_weights = clipped_inv_freqs
-    # penalty_weights = variant_entropies[:, None]
-
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset = Subset(full_dataset, val_indices)
 
@@ -136,13 +118,13 @@ def train(args):
         train_dataset,
         batch_size=config["batch_size"],
         shuffle=True,
-        num_workers=2
+        num_workers=0
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=len(val_dataset),
-        num_workers=1
+        num_workers=0
     )
 
     model = ChildBlockAutoencoder(
@@ -160,7 +142,6 @@ def train(args):
         dec_h_dropout_p=config["dec_h_dropout_p"],
         activation=config["model/activation"],
         use_standardized_genotype=config["use_standardized_genotype"],
-        softmax_weights=softmax_weights,
         partial_chunk_size=200,
         partial_connection_h=20,
     )

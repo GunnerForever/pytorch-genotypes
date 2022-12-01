@@ -1,4 +1,3 @@
-from functools import partial
 import torch
 from torch import nn
 import pytorch_lightning as pl
@@ -24,13 +23,11 @@ class ChildBlockAutoencoder(GenotypeAutoencoder):
         dec_h_dropout_p,
         activation,
         use_standardized_genotype,
-        softmax_weights,
         partial_chunk_size,
         partial_connection_h,
     ):
         super().__init__(
             use_standardized_genotype=use_standardized_genotype,
-            softmax_weights=softmax_weights
         )
         self.save_hyperparameters()
         self.encoder = MLP(
