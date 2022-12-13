@@ -8,6 +8,8 @@ https://github.com/facebookresearch/DomainBed
 
 from typing import Optional
 
+from typing import Optional, List
+
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -105,7 +107,9 @@ class WindowedLinearIRM(LinearIRM):
     def __init__(
         self,
         windows: torch.Tensor,
-        *args, **kwargs
+        *args,
+        penalty_history: bool = False,
+        **kwargs
     ):
         """Linear IRM where the penalty is applied in windows.
 
@@ -114,9 +118,13 @@ class WindowedLinearIRM(LinearIRM):
 
         """
         super().__init__(*args, **kwargs)
-        self._penalty_history = []
 
-    def get_penalties(self, x_e, y_e):
+        if penalty_history:
+            self._penalty_histories: Optional[List[torch.Tensor]] = []
+        else:
+            self._penalty_histories = None
+
+    def get_prediction_and_local_penalties(self, x_e, y_e):
         n_windows = self.hparams.windows.shape[0]
 
         # Compute penalty by window.
@@ -126,17 +134,23 @@ class WindowedLinearIRM(LinearIRM):
             device=self.device
         )
 
+        y_hat = 0
+
         for i in range(n_windows):
             left, right = self.hparams.windows[i, :]
 
             x_e_local = x_e[:, left:(right+1)]  # n x m
             w = self.betas.weight[:, left:(right+1)]  # 1 x m
+
+            assert w.shape[1] > 0
+
             y_hat_e_local = x_e_local @ w.T + self.betas.bias
 
             window_penalty = self._irm_penalty(y_hat_e_local, y_e)
             penalties[i] = window_penalty
+            y_hat += y_hat_e_local
 
-        return penalties
+        return y_hat, penalties
 
     def on_train_end(self):
         import json
@@ -145,33 +159,40 @@ class WindowedLinearIRM(LinearIRM):
 
     def _step(self, batch, batch_idx, prefix=""):
         loss = 0.0
-        penalties: Optional[torch.Tensor] = None
+        penalty = 0.0
+
+        n_windows = self.hparams.windows.shape[0]
 
         # Calculate weight norms for penalized models.
         l1 = torch.norm(self.betas.weight, 1)
         l2 = torch.norm(self.betas.weight, 2)
 
+        track_penalties = self._penalty_histories is not None
+
+        if track_penalties:
+            cur_penalties = torch.zeros(n_windows)
+
         for x_e, y_e in batch:
             x_e = x_e.to(torch.float32)
             y_e = y_e.to(torch.float32)
 
-            y_hat_e = self.betas(x_e)
+            y_hat_e, penalties = self.get_prediction_and_local_penalties(
+                x_e, y_e
+            )
+
+            if track_penalties:
+                cur_penalties += penalties
+
             env_loss = self.loss(y_hat_e, y_e)
 
-            penalties_e = self.get_penalties(x_e, y_e)
-
             loss += env_loss
-            if penalties is None:
-                penalties = penalties_e
-            else:
-                penalties += penalties_e
+            penalty += torch.norm(penalties) / n_windows
+
+        if track_penalties:
+            self._penalty_histories.append(cur_penalties / n_windows)
 
         loss /= len(batch)
         penalty = torch.norm(penalties) / len(batch)
-
-        self._penalty_history.append(
-            (self.global_step, penalties.detach().numpy().tolist())
-        )
 
         irm_loss = (
             loss +
