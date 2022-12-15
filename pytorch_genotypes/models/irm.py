@@ -21,7 +21,7 @@ from ..dataset.utils import MultiEnvironmentIteratorFromSingleDataset
 
 class LinearIRM(pl.LightningModule):
     def __init__(self, n_input, lr, irm_lam=1, loss="mse", weight_decay=0,
-                 l1_penalty=0, ib_penalty_lam=0):
+                 l1_penalty=0):
         super().__init__()
         self.save_hyperparameters()
         self.betas = nn.Linear(n_input, 1, dtype=torch.float32)
@@ -36,20 +36,40 @@ class LinearIRM(pl.LightningModule):
         print("Initializing IRM with hyperparameters:")
         print(self.hparams)
 
-    def _irm_penalty(self, y_hat, y):
-        w = torch.tensor(
-            1.,
-            dtype=torch.float32,
-            device=self.device
-        ).requires_grad_()
+    @staticmethod
+    def _loss_and_irm_penalty_static(
+        x,
+        y,
+        betas,
+        intercept=0,
+        loss=F.mse_loss,
+        device=None,
+    ):
+        # betas: 1 x p
+        # x: mb x p
+        # y: mb x 1
+        w = torch.tensor(1., device=device).requires_grad_()
 
-        loss_1 = self.loss(y_hat[0::2] * w, y[0::2])
-        loss_2 = self.loss(y_hat[1::2] * w, y[1::2])
+        scaled_yhat = w * (x @ betas.T) + intercept
+
+        full_loss = loss(scaled_yhat, y, reduction="none")
+
+        loss_1 = torch.mean(full_loss[::2])
+        loss_2 = torch.mean(full_loss[1::2])
 
         grad_1 = autograd.grad(loss_1, [w], create_graph=True)[0]
         grad_2 = autograd.grad(loss_2, [w], create_graph=True)[0]
 
-        return torch.sum(grad_1 * grad_2)
+        return full_loss, torch.sum(grad_1 * grad_2)
+
+    def _loss_and_irm_penalty(self, x, y):
+        return self._loss_and_irm_penalty_static(
+            x=x,
+            y=y,
+            betas=self.betas.weight,
+            intercept=self.betas.bias,
+            loss=self.loss,
+        )
 
     def training_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, "train_")
@@ -66,20 +86,14 @@ class LinearIRM(pl.LightningModule):
         l1 = torch.norm(self.betas.weight, 1)
         l2 = torch.norm(self.betas.weight, 2)
 
-        y_hat_envs = []
-
         for x_e, y_e in batch:
             x_e = x_e.to(torch.float32)
             y_e = y_e.to(torch.float32)
 
-            y_hat_e = self.betas(x_e)
-            env_loss = self.loss(y_hat_e, y_e)
-            env_penalty = self._irm_penalty(y_hat_e, y_e)
+            env_loss, env_penalty = self._loss_and_irm_penalty(x_e, y_e)
 
             loss += env_loss
             penalty += env_penalty
-
-            y_hat_envs.append(y_hat_e)
 
         loss /= len(batch)
         penalty /= len(batch)
@@ -90,11 +104,6 @@ class LinearIRM(pl.LightningModule):
             (self.hparams.weight_decay * l2) +
             (self.hparams.l1_penalty * l1)
         )
-
-        if self.hparams.ib_penalty_lam != 0:
-            ib_penalty = torch.stack(y_hat_envs).var(dim=1).mean()
-            irm_loss += self.hparams.ib_penalty_lam * ib_penalty
-            self.log(f"{prefix}ib_penalty", ib_penalty)
 
         self.log(f"{prefix}penalty", penalty)
         self.log(f"{prefix}erm_loss", loss)
@@ -150,13 +159,17 @@ class WindowedLinearIRM(LinearIRM):
             x_e_local = x_e[:, left:(right+1)]  # n x m
             w = self.betas.weight[:, left:(right+1)]  # 1 x m
 
-            assert w.shape[1] > 0
+            _, window_penalty = self._loss_and_irm_penalty_static(
+                x_e_local,
+                y_e,
+                betas=w,
+                intercept=self.betas.bias,
+                loss=self.loss,
+                device=self.device,
+            )
 
-            y_hat_e_local = x_e_local @ w.T
-
-            window_penalty = self._irm_penalty(y_hat_e_local, y_e)
             penalties[i] = window_penalty
-            y_hat = y_hat + y_hat_e_local
+            y_hat = y_hat + x_e_local @ w.T
 
         return y_hat, penalties
 
