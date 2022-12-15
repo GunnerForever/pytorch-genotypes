@@ -43,7 +43,7 @@ class LinearIRM(pl.LightningModule):
         betas,
         intercept=0,
         loss=F.mse_loss,
-        device=None,
+        device=None
     ):
         # betas: 1 x p
         # x: mb x p
@@ -165,7 +165,7 @@ class WindowedLinearIRM(LinearIRM):
                 betas=w,
                 intercept=self.betas.bias,
                 loss=self.loss,
-                device=self.device,
+                device=self.device
             )
 
             penalties[i] = window_penalty
