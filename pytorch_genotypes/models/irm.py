@@ -6,8 +6,7 @@ https://github.com/facebookresearch/DomainBed
 
 """
 
-from typing import Optional
-
+import json
 from typing import Optional, List
 
 import torch
@@ -22,7 +21,7 @@ from ..dataset.utils import MultiEnvironmentIteratorFromSingleDataset
 
 class LinearIRM(pl.LightningModule):
     def __init__(self, n_input, lr, irm_lam=1, loss="mse", weight_decay=0,
-                 l1_penalty=0):
+                 l1_penalty=0, ib_penalty_lam=0):
         super().__init__()
         self.save_hyperparameters()
         self.betas = nn.Linear(n_input, 1, dtype=torch.float32)
@@ -44,7 +43,7 @@ class LinearIRM(pl.LightningModule):
             device=self.device
         ).requires_grad_()
 
-        loss_1 = self.loss(y_hat[::2] * w, y[::2])
+        loss_1 = self.loss(y_hat[0::2] * w, y[0::2])
         loss_2 = self.loss(y_hat[1::2] * w, y[1::2])
 
         grad_1 = autograd.grad(loss_1, [w], create_graph=True)[0]
@@ -67,6 +66,8 @@ class LinearIRM(pl.LightningModule):
         l1 = torch.norm(self.betas.weight, 1)
         l2 = torch.norm(self.betas.weight, 2)
 
+        y_hat_envs = []
+
         for x_e, y_e in batch:
             x_e = x_e.to(torch.float32)
             y_e = y_e.to(torch.float32)
@@ -78,6 +79,8 @@ class LinearIRM(pl.LightningModule):
             loss += env_loss
             penalty += env_penalty
 
+            y_hat_envs.append(y_hat_e)
+
         loss /= len(batch)
         penalty /= len(batch)
 
@@ -87,6 +90,11 @@ class LinearIRM(pl.LightningModule):
             (self.hparams.weight_decay * l2) +
             (self.hparams.l1_penalty * l1)
         )
+
+        if self.hparams.ib_penalty_lam != 0:
+            ib_penalty = torch.stack(y_hat_envs).var(dim=1).mean()
+            irm_loss += self.hparams.ib_penalty_lam * ib_penalty
+            self.log(f"{prefix}ib_penalty", ib_penalty)
 
         self.log(f"{prefix}penalty", penalty)
         self.log(f"{prefix}erm_loss", loss)
@@ -134,7 +142,7 @@ class WindowedLinearIRM(LinearIRM):
             device=self.device
         )
 
-        y_hat = 0
+        y_hat = self.betas.bias
 
         for i in range(n_windows):
             left, right = self.hparams.windows[i, :]
@@ -144,18 +152,18 @@ class WindowedLinearIRM(LinearIRM):
 
             assert w.shape[1] > 0
 
-            y_hat_e_local = x_e_local @ w.T + self.betas.bias
+            y_hat_e_local = x_e_local @ w.T
 
             window_penalty = self._irm_penalty(y_hat_e_local, y_e)
             penalties[i] = window_penalty
-            y_hat += y_hat_e_local
+            y_hat = y_hat + y_hat_e_local
 
         return y_hat, penalties
 
     def on_train_end(self):
-        import json
         with open("_penalty_history.json", "wt") as f:
-            json.dump(self._penalty_history, f)
+            json.dump([penalties.detach().numpy().tolist()
+                       for penalties in self._penalty_histories], f)
 
     def _step(self, batch, batch_idx, prefix=""):
         loss = 0.0
@@ -192,7 +200,7 @@ class WindowedLinearIRM(LinearIRM):
             self._penalty_histories.append(cur_penalties / n_windows)
 
         loss /= len(batch)
-        penalty = torch.norm(penalties) / len(batch)
+        penalty /= len(batch)
 
         irm_loss = (
             loss +
@@ -208,6 +216,12 @@ class WindowedLinearIRM(LinearIRM):
         self.log("l1", l1)
 
         return irm_loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(
+            self.parameters(),
+            lr=self.hparams.lr,
+        )
 
 
 def make_fixed_windows(seq_len: int, window_size: int) -> torch.Tensor:
