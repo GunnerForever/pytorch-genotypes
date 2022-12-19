@@ -21,10 +21,13 @@ from ..dataset.utils import MultiEnvironmentIteratorFromSingleDataset
 
 class LinearIRM(pl.LightningModule):
     def __init__(self, n_input, lr, irm_lam=1, loss="mse", weight_decay=0,
-                 l1_penalty=0):
+                 l1_penalty=0, intercept=True):
         super().__init__()
         self.save_hyperparameters()
-        self.betas = nn.Linear(n_input, 1, dtype=torch.float32)
+        self.betas = nn.Linear(
+            n_input, 1, dtype=torch.float32,
+            bias=bool(intercept)
+        )
 
         if loss == "mse":
             self.loss = F.mse_loss
@@ -50,6 +53,9 @@ class LinearIRM(pl.LightningModule):
         # y: mb x 1
         w = torch.tensor(1., device=device).requires_grad_()
 
+        if not intercept:
+            intercept = 0
+
         scaled_yhat = w * (x @ betas.T) + intercept
 
         full_loss = loss(scaled_yhat, y, reduction="none")
@@ -60,7 +66,7 @@ class LinearIRM(pl.LightningModule):
         grad_1 = autograd.grad(loss_1, [w], create_graph=True)[0]
         grad_2 = autograd.grad(loss_2, [w], create_graph=True)[0]
 
-        return full_loss, torch.sum(grad_1 * grad_2)
+        return torch.mean(full_loss), torch.sum(grad_1 * grad_2)
 
     def _loss_and_irm_penalty(self, x, y):
         return self._loss_and_irm_penalty_static(
@@ -152,24 +158,29 @@ class WindowedLinearIRM(LinearIRM):
         )
 
         y_hat = self.betas.bias
+        if y_hat is None:
+            y_hat = 0
 
         for i in range(n_windows):
             left, right = self.hparams.windows[i, :]
 
             x_e_local = x_e[:, left:(right+1)]  # n x m
-            w = self.betas.weight[:, left:(right+1)]  # 1 x m
+            window_betas = self.betas.weight[:, left:(right+1)]  # 1 x m
+
+            # FIXME
+            y_e_local = y_e - torch.mean(y_e[x_e_local == 0])
 
             _, window_penalty = self._loss_and_irm_penalty_static(
                 x_e_local,
-                y_e,
-                betas=w,
+                y_e_local,  # FIXME
+                betas=window_betas,
                 intercept=self.betas.bias,
                 loss=self.loss,
                 device=self.device
             )
 
             penalties[i] = window_penalty
-            y_hat = y_hat + x_e_local @ w.T
+            y_hat = y_hat + x_e_local @ window_betas.T
 
         return y_hat, penalties
 
