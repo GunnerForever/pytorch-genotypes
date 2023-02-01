@@ -21,7 +21,7 @@ from ..dataset.utils import MultiEnvironmentIteratorFromSingleDataset
 
 class LinearIRM(pl.LightningModule):
     def __init__(self, n_input, lr, irm_lam=1, loss="mse", weight_decay=0,
-                 l1_penalty=0, intercept=True):
+                 intercept=True):
         super().__init__()
         self.save_hyperparameters()
         self.betas = nn.Linear(
@@ -46,8 +46,14 @@ class LinearIRM(pl.LightningModule):
         betas,
         intercept=0,
         loss=F.mse_loss,
-        device=None
+        device=None,
+        center_x=False
     ):
+
+        freq = torch.mean(x, dim=0) / 2
+        if center_x:
+            x = x - freq * 2
+
         # betas: 1 x p
         # x: mb x p
         # y: mb x 1
@@ -66,7 +72,10 @@ class LinearIRM(pl.LightningModule):
         grad_1 = autograd.grad(loss_1, [w], create_graph=True)[0]
         grad_2 = autograd.grad(loss_2, [w], create_graph=True)[0]
 
-        return torch.mean(full_loss), torch.sum(grad_1 * grad_2)
+        # penalty = torch.sum(grad_1 * grad_2) / torch.sum(freq * (1 - freq))
+        penalty = torch.sum(grad_1 * grad_2)
+
+        return torch.mean(full_loss), penalty
 
     def _loss_and_irm_penalty(self, x, y):
         return self._loss_and_irm_penalty_static(
@@ -107,8 +116,7 @@ class LinearIRM(pl.LightningModule):
         irm_loss = (
             loss +
             (self.hparams.irm_lam * penalty) +
-            (self.hparams.weight_decay * l2) +
-            (self.hparams.l1_penalty * l1)
+            (self.hparams.weight_decay * l2)
         )
 
         self.log(f"{prefix}penalty", penalty)
@@ -120,7 +128,7 @@ class LinearIRM(pl.LightningModule):
         return irm_loss
 
     def configure_optimizers(self):
-        return torch.optim.LBFGS(
+        return torch.optim.Adam(
             self.parameters(),
             lr=self.hparams.lr,
         )
@@ -167,16 +175,14 @@ class WindowedLinearIRM(LinearIRM):
             x_e_local = x_e[:, left:(right+1)]  # n x m
             window_betas = self.betas.weight[:, left:(right+1)]  # 1 x m
 
-            # FIXME
-            y_e_local = y_e - torch.mean(y_e[x_e_local == 0])
-
             _, window_penalty = self._loss_and_irm_penalty_static(
                 x_e_local,
-                y_e_local,  # FIXME
+                y_e,
                 betas=window_betas,
                 intercept=self.betas.bias,
                 loss=self.loss,
-                device=self.device
+                device=self.device,
+                center_x=True
             )
 
             penalties[i] = window_penalty
@@ -218,7 +224,7 @@ class WindowedLinearIRM(LinearIRM):
             env_loss = self.loss(y_hat_e, y_e)
 
             loss += env_loss
-            penalty += torch.norm(penalties) / n_windows
+            penalty += torch.norm(penalties, 1) / n_windows
 
         if track_penalties:
             self._penalty_histories.append(cur_penalties / n_windows)
@@ -229,9 +235,11 @@ class WindowedLinearIRM(LinearIRM):
         irm_loss = (
             loss +
             (self.hparams.irm_lam * penalty) +
-            (self.hparams.weight_decay * l2) +
-            (self.hparams.l1_penalty * l1)
+            (self.hparams.weight_decay * l2)
         )
+
+        self.log(f"{prefix}erm_vs_lam_penalty_ratio",
+                 loss / (self.hparams.irm_lam * penalty))
 
         self.log(f"{prefix}penalty", penalty)
         self.log(f"{prefix}erm_loss", loss)
