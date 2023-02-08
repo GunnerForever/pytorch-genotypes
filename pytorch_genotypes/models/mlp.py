@@ -21,12 +21,17 @@ except ImportError:
 from .utils import build_mlp
 
 
-LossString = Literal["mse", "binary_cross_entropy_with_logits"]
+LossString = Literal[
+    "mse",
+    "binary_cross_entropy_with_logits",
+    "cross_entropy"
+]
 
 
 LOSS_MAP: Dict[LossString, Callable] = {
     "mse": F.mse_loss,
-    "binary_cross_entropy_with_logits": F.binary_cross_entropy_with_logits
+    "binary_cross_entropy_with_logits": F.binary_cross_entropy_with_logits,
+    "cross_entropy": F.cross_entropy,
 }
 
 
@@ -37,6 +42,7 @@ class MLP(pl.LightningModule):
         hidden_layers: Iterable[int],
         output_size: int,
         loss: Optional[LossString],
+        lr: float,
         use_dosage: bool = True,
         do_chunk: Optional[Literal["input", "output"]] = None,
         chunk_size: Optional[int] = None,
@@ -134,9 +140,17 @@ class MLP(pl.LightningModule):
             x = torch.hstack([x, batch.exogenous])
 
         y_hat = self.forward(x)
+        loss = self.loss(y_hat, batch.endogenous)
 
-        return self.loss(y_hat, batch.endogenous)
+        self.log("train_loss", loss)
+
+        return loss
 
     def configure_optimizers(self):
+        if self.hparams.weight_decay is not None:
+            wd = self.hparams.weight_decay
+        else:
+            wd = 0
+
         return torch.optim.Adam(self.parameters(), lr=self.hparams.lr,
-                                weight_decay=self.hparams.weight_decay)
+                                weight_decay=wd)

@@ -168,6 +168,7 @@ class WindowedLinearIRM(LinearIRM):
             window_betas = self.betas.weight[:, left:(right+1)]  # 1 x m
 
             # FIXME
+            raise RuntimeError()
             y_e_local = y_e - torch.mean(y_e[x_e_local == 0])
 
             _, window_penalty = self._loss_and_irm_penalty_static(
