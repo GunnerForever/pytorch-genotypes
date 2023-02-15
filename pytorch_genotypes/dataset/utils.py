@@ -96,7 +96,7 @@ class TensorScaler(object):
         max_memory_in_bytes: int = int(1e8),
         from_mafs: Optional[torch.Tensor] = None,
         _force_chunk_size: int = 0
-    ):
+    ) -> None:
         tensor = tensor.to(torch.float32)
 
         if from_mafs is None:
@@ -110,8 +110,12 @@ class TensorScaler(object):
         self.center = 2 * mafs
         self.scale = torch.sqrt(2 * mafs * (1 - mafs))
 
-    def init_scaler_default(self, tensor, max_memory_in_bytes,
-                            _force_chunk_size):
+    def init_scaler_default(
+        self,
+        tensor: torch.Tensor,
+        max_memory_in_bytes: int,
+        _force_chunk_size: int
+    ):
         tensor_bytes = tensor.element_size() * tensor.nelement()
 
         if _force_chunk_size or (tensor_bytes > max_memory_in_bytes):

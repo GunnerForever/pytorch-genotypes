@@ -9,7 +9,7 @@ import pprint
 from typing import Dict
 from pkg_resources import resource_filename
 
-from pytorch_genotypes.dataset.core import FixedSizeChunks
+from pytorch_genotypes.dataset.core import FixedSizeChunks, UnionGeneticDataset
 
 import numpy as np
 from torch.utils.data import DataLoader, Subset
@@ -18,7 +18,7 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint, EarlyStopping, Callback
 )
 
-from .models import ChildBlockAutoencoder
+from .models import ChildBlockAutoencoder, ParentBlockAutoencoder
 
 from ..dataset import BACKENDS
 
@@ -35,8 +35,13 @@ DEFAULT_TEMPLATE = resource_filename(
 )
 
 
-DEFAULT_CONFIG = resource_filename(
-    __name__, os.path.join("config_files", "block_trainer_model_config.py")
+DEFAULT_CHILD_CONFIG = resource_filename(
+    __name__,
+    os.path.join("config_files", "block_trainer_child_model_config.py")
+)
+DEFAULT_PARENT_CONFIG = resource_filename(
+    __name__,
+    os.path.join("config_files", "block_trainer_parent_model_config.py")
 )
 
 
@@ -90,7 +95,7 @@ def parse_config(filename):
     return conf
 
 
-def train(args):
+def train_child(args):
     config = parse_config(args.config)
 
     print("Current model configuration:")
@@ -193,13 +198,103 @@ def train(args):
     trainer.fit(model, train_loader, val_loader)
 
 
+def train_parent(args):
+    config = parse_config(args.config)
+
+    # Restore child models.
+    model1 = ChildBlockAutoencoder.load_from_checkpoint(os.path.join(
+        args.checkpoint_directory, f"model-block-{args.block1}.ckpt"
+    ))
+
+    model2 = ChildBlockAutoencoder.load_from_checkpoint(os.path.join(
+        args.checkpoint_directory, f"model-block-{args.block2}.ckpt"
+    ))
+
+    parent_model = ParentBlockAutoencoder(
+        model1=model1.encoder,
+        model2=model2.encoder,
+        output_size=model1.hparams.chunk_size * 2,  # Two blocks.
+        enc_layers=config["model/enc_layers"],
+        dec_layers=config["model/dec_layers"],
+        rep_size=config["model/rep_size"],
+        lr=config["lr"],
+        batch_size=config["batch_size"],
+        max_epochs=config["max_epochs"],
+        weight_decay=config["weight_decay"],
+        add_batchnorm=config["add_batchnorm"],
+        input_dropout_p=config["input_dropout_p"],
+        enc_h_dropout_p=config["enc_h_dropout_p"],
+        dec_h_dropout_p=config["dec_h_dropout_p"],
+        activation=config["model/activation"],
+        use_standardized_genotype=config["use_standardized_genotype"],
+    )
+
+    config = parse_config(args.config)
+
+    print("Current model configuration:")
+    pprint.pprint(config)
+
+    backend = BACKENDS[args.backend].load(args.backend_pickle_filename)
+    chunks = FixedSizeChunks(backend, max_variants_per_chunk=args.chunk_size)
+
+    # Recover the validation indices.
+    val_indices = np.load(VAL_INDICES_FILENAME)["arr_0"]
+    train_indices = np.setdiff1d(np.arange(len(backend)), val_indices)
+
+    block1 = chunks.get_dataset_for_chunk_id(args.block1)
+    block2 = chunks.get_dataset_for_chunk_id(args.block2)
+
+    # A faster version would use chunks of double the size and do index
+    # arithmetic. This is TODO for now.
+    full_dataset = UnionGeneticDataset(block1, block2)
+
+    train_dataset = Subset(full_dataset, train_indices)
+    val_dataset = Subset(full_dataset, val_indices)
+
+    print("n train:", len(train_dataset))
+    print("n val:", len(val_dataset))
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        num_workers=0
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=len(val_dataset),
+        num_workers=0
+    )
+
+    logger = None
+    if args.wandb_logger:
+        from pytorch_lightning.loggers import WandbLogger
+        wandb_logger = WandbLogger(
+            project=f"block_trainer_parent_{args.block1}-{args.block2}"
+        )
+        logger = wandb_logger
+
+    trainer = pl.Trainer(
+        log_every_n_steps=1,
+        accelerator="gpu",
+        devices=-1,  # use all GPUs
+        max_epochs=config["max_epochs"],
+        logger=logger,
+        #  callbacks=callbacks  # TODO
+    )
+    trainer.fit(parent_model, train_loader, val_loader)
+
+
 def main():
     args = parse_args()
     backend = BACKENDS[args.backend].load(args.backend_pickle_filename)
     chunks = FixedSizeChunks(backend, max_variants_per_chunk=args.chunk_size)
 
-    if args.mode == "train":
-        return train(args)
+    if args.mode == "train-child":
+        return train_child(args)
+    elif args.mode == "train-parent":
+        return train_parent(args)
 
     # Create the validation dataset.
     n_val = int(round(len(backend) * args.val_proportion))
@@ -276,7 +371,7 @@ def parse_args() -> argparse.Namespace:
     # For now, we only allow fixed size chunks.
     parser.add_argument(
         "--chunk-size",
-        default=1000,
+        default=5000,
         type=int,
         help="Number of contiguous variants that are jointly modeled in the "
         "blocks of the first level.",
@@ -302,13 +397,37 @@ def parse_args() -> argparse.Namespace:
 
     # Subparser.
     subparsers = parser.add_subparsers(dest="mode")
-    exec_parser = subparsers.add_parser("train")
-    exec_parser.add_argument("--chunk-index", required=True, type=int)
-    exec_parser.add_argument(
-        "--config", default=DEFAULT_CONFIG,
+    child_parser = subparsers.add_parser("train-child")
+    child_parser.add_argument("--chunk-index", required=True, type=int)
+    child_parser.add_argument(
+        "--config", default=DEFAULT_CHILD_CONFIG,
         help=f"Python configuration file for hyperparameters and autoencoder "
-             f"model. See {DEFAULT_CONFIG} for an example."
+             f"model. See {DEFAULT_CHILD_CONFIG} for an example."
     )
-    exec_parser.add_argument("--wandb-logger", action="store_true")
+    child_parser.add_argument("--wandb-logger", action="store_true")
+
+    parent_parser = subparsers.add_parser("train-parent")
+    parent_parser.add_argument(
+        "--config", default=DEFAULT_PARENT_CONFIG,
+        help=f"Python configuration file for hyperparameters and autoencoder "
+             f"model. See {DEFAULT_PARENT_CONFIG} for an example."
+    )
+    parent_parser.add_argument(
+        "--checkpoint-directory",
+        default="chunk_checkpoints",
+        help="Directory where to look for for the child model checkpoints."
+    )
+    parent_parser.add_argument(
+        "--block1", "-b1",
+        help="Index of first block.", required=True, type=int
+
+    )
+    parent_parser.add_argument(
+        "--block2", "-b2",
+        help="Index of second block.", required=True, type=int
+    )
+    parent_parser.add_argument(
+        "--wandb-logger", action="store_true"
+    )
 
     return parser.parse_args()

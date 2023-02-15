@@ -38,10 +38,10 @@ T = TypeVar("T", bound="GeneticDatasetBackend")
 class Batch(collections.abc.Sequence):
     __slots__ = ("name", "_fields", "payload", "_key_to_index")
 
-    def __init__(self, name, fields, *payload):
+    def __init__(self, name: str, fields: Iterable[str], *payload) -> None:
         self.name = name
-        self._fields = fields
-        self.payload: List[Any] = payload
+        self._fields = tuple(fields)
+        self.payload: Tuple[Any, ...] = payload
 
         self._key_to_index = {k: i for i, k in enumerate(fields)}
 
@@ -261,6 +261,44 @@ class GeneticDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.backend)
+
+
+class UnionGeneticDataset(Dataset):
+    def __init__(
+        self, dataset1: GeneticDataset, dataset2: GeneticDataset
+    ):
+        """Genetic dataset that combines two compatible datasets.
+
+        Here, combination is variant-wise / column-wise.
+
+        Both datasets will be checked for length, but not for sample
+        permutation. This is left to the user.
+
+        Both datasets should also be configured so that they generate
+        compatible fields/information. For example, variant standardization
+        and similar functionality should be enabled or disabled for both
+        datasets.
+
+        """
+        self.dataset1 = dataset1
+        self.dataset2 = dataset2
+
+        assert len(dataset1) == len(dataset2)
+
+    def __getitem__(self, index: int) -> Batch:
+        batch1 = self.dataset1[index]
+        batch2 = self.dataset1[index]
+
+        assert batch1._fields == batch2._fields
+
+        concatenated = []
+        for value1, value2 in zip(batch1, batch2):
+            concatenated.append(torch.hstack((value1, value2)))
+
+        return type(batch1)(batch1.name, batch1._fields, *concatenated)
+
+    def __len__(self) -> int:
+        return len(self.dataset1)
 
 
 class _Chunk(object):

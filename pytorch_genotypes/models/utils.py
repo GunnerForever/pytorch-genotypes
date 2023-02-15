@@ -8,7 +8,7 @@ def build_mlp(
     out: Optional[int] = None,
     add_batchnorm: bool = False,
     activations: Iterable[nn.Module] = [nn.LeakyReLU()]
-):
+) -> List[nn.Module]:
     layers: List[nn.Module] = []
     h_prev = _in
     for h in hidden:

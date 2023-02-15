@@ -1,2 +1,7 @@
-from .autoencoder import GenotypeAutoencoder  # noqa: F401
-from .mlp import MLP  # noqa: F401
+# flake8: noqa
+from .autoencoder import (
+    GenotypeAutoencoder2Latent as GenotypeAutoencoder,
+    GenotypeAutoencoder2Latent,
+    GenotypeAutoencoder3Classes
+)
+from .mlp import MLP
