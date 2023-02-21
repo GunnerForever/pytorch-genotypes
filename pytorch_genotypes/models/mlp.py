@@ -5,7 +5,7 @@ This is provided mainly to help build more complex models.
 
 """
 
-from typing import List, Optional, Iterable, Callable, Dict
+from typing import List, Optional, Iterable, Callable, Dict, Union
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -28,7 +28,10 @@ LossString = Literal[
 ]
 
 
-LOSS_MAP: Dict[LossString, Callable] = {
+LossCallable = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+
+
+LOSS_MAP: Dict[LossString, LossCallable] = {
     "mse": F.mse_loss,
     "binary_cross_entropy_with_logits": F.binary_cross_entropy_with_logits,
     "cross_entropy": F.cross_entropy,
@@ -41,7 +44,7 @@ class MLP(pl.LightningModule):
         input_size: int,
         hidden_layers: Iterable[int],
         output_size: int,
-        loss: Optional[LossString],
+        loss: Optional[Union[LossString, LossCallable]],
         lr: float,
         use_dosage: bool = True,
         do_chunk: Optional[Literal["input", "output"]] = None,
@@ -57,7 +60,11 @@ class MLP(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         if loss is not None:
-            self.loss: Optional[Callable] = LOSS_MAP[loss]
+            if callable(loss):
+                self.loss: Optional[LossCallable] = loss
+
+            else:
+                self.loss = LOSS_MAP[loss]
         else:
             self.loss = None
 
