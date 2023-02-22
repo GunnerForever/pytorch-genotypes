@@ -338,6 +338,7 @@ def main():
         f"xargs for parallelism. You may edit the file as needed to suit your "
         f"computing environment.\n\n"
         f"Once this is done, run the step 2 (to be documented)."
+        f"After, run step 3 which will combine parent chunk predictions (TODO)"
     )
 
 
@@ -420,7 +421,6 @@ def parse_args() -> argparse.Namespace:
     parent_parser.add_argument(
         "--block1", "-b1",
         help="Index of first block.", required=True, type=int
-
     )
     parent_parser.add_argument(
         "--block2", "-b2",

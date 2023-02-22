@@ -1,9 +1,7 @@
-from typing import Tuple, Iterable
+from typing import Iterable
 
 import torch
 from torch import nn
-import pytorch_lightning as pl
-import torch.nn.functional as F
 
 from ..models import GenotypeAutoencoder2Latent, MLP
 from ..models.utils import build_mlp
